@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llmcmd"
+dynamic = ["version"]
+description = "Unified LLM CLI for text, image, audio, and batch tasks"
+readme = "SKILL.md"
+requires-python = ">=3.10"
+dependencies = [
+  "click>=8.1",
+  "openai>=1.0",
+]
+
+[project.optional-dependencies]
+batch = [
+  "pyyaml>=6.0",
+]
+
+[project.scripts]
+llm = "llm_cli.cli:cli"
+
+[tool.hatch.version]
+path = "src/llm_cli/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llm_cli"]
