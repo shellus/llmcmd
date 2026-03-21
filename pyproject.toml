@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "llmcmd"
+name = "shellus-llmcmd"
 dynamic = ["version"]
 description = "Unified LLM CLI for text, image, audio, and batch tasks"
 readme = "SKILL.md"
