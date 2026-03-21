@@ -161,11 +161,22 @@ tasks:
 
 ## 配置
 
-脚本从 `~/.config/llm-api/.env` 读取配置，环境变量可覆盖：
+脚本默认从 `~/.config/llm-api/.env` 读取配置，环境变量可覆盖同名字段。
+
+最小配置示例：
 
 ```bash
 API_KEY=your_api_key
 BASE_URL=https://your-api-endpoint/v1
+LLM_MODEL=your_default_model
+```
+
+按模式拆分模型时可使用：
+
+```bash
+LLM_TEXT_MODEL=your_chat_model
+LLM_IMAGE_MODEL=your_image_model
+LLM_AUDIO_MODEL=your_audio_model
 ```
 
 模型优先级：
@@ -182,6 +193,14 @@ BASE_URL=https://your-api-endpoint/v1
 - `LLM_CONCURRENCY`
 - 兼容旧变量（仅单一任务类型 batch 时生效）
 - 默认 `4`
+
+常用并发配置示例：
+
+```bash
+LLM_CONCURRENCY=4
+OPENAI_CHAT_CONCURRENCY=4
+OPENAI_IMAGE_CONCURRENCY=4
+```
 
 ## 常见错误
 

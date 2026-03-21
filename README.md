@@ -126,6 +126,44 @@ tasks:
 ### `llm batch`
 用于 YAML 批量任务编排。
 
+## 配置
+
+`shellus-llmcmd` 默认从以下位置读取配置：
+
+```bash
+~/.config/llm-api/.env
+```
+
+最小配置示例：
+
+```bash
+API_KEY=your_api_key
+BASE_URL=https://your-api-endpoint/v1
+LLM_MODEL=your_default_model
+```
+
+如果你希望按能力拆分模型，也可以这样配置：
+
+```bash
+LLM_TEXT_MODEL=your_chat_model
+LLM_IMAGE_MODEL=your_image_model
+LLM_AUDIO_MODEL=your_audio_model
+```
+
+常用并发配置：
+
+```bash
+LLM_CONCURRENCY=4
+OPENAI_CHAT_CONCURRENCY=4
+OPENAI_IMAGE_CONCURRENCY=4
+```
+
+模型优先级：
+
+- `chat`：`LLM_TEXT_MODEL` → `LLM_MODEL` → `OPENAI_CHAT_MODEL` → `OPENAI_MODEL`
+- `image`：`LLM_IMAGE_MODEL` → `LLM_MODEL` → `OPENAI_IMAGE_MODEL`
+- `audio`：`LLM_AUDIO_MODEL` → `LLM_MODEL` → `GEMINI_AUDIO_MODEL`
+
 ## 包信息
 
 - PyPI 包名：`shellus-llmcmd`
