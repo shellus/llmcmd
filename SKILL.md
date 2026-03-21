@@ -3,38 +3,28 @@ name: llm
 description: Use when text generation, image generation or editing, audio transcription, or mixed YAML orchestration tasks need to be handled through one unified CLI entry.
 ---
 
-# Unified LLM CLI
+# llm skill
 
-通过统一的 `llm.py` / `llm` 入口处理对话生成、图片生成/编辑、音频转录，以及显式的 YAML 编排调用。
+统一的 `llm` 命令行入口，用于：
 
-## 使用时机
+- 文本生成、改写、总结、提取、翻译
+- 图片生成、参考图编辑、多图生成
+- 音频转录、字幕输出
+- YAML 批量任务编排
+- 按用户要求直接编辑文本文件
 
-当用户有以下需求时，优先使用这个 skill：
-- 文本输入、文本输出：改写、润色、总结、提取、翻译、生成文案
-- 图片生成或编辑：文生图、参考图编辑、批量生成图片
-- 音频转录：将音频转为文本或 SRT 字幕
-- 需要一个 YAML 文件里统一编排多条 chat / image / audio 任务
+## 适用场景
 
-> [!warning]
-> 单次模式和 YAML 模式**必须显式区分**。
-> - 单次：`chat` / `image` / `audio`
-> - YAML：`batch <yaml_path>`
->
-> 不要再使用“把 `.yaml` 当作位置参数自动识别”的旧方式。
+当用户希望在终端里完成以下事情时，优先使用这个 skill：
 
-## 安装
+- 生成一段文本、润色一份文案、总结多份资料
+- 根据一张图来分析内容，或据此改写提示词
+- 生成一张或多张图片
+- 把音频转成文本或 SRT 字幕
+- 用一个 YAML 文件批量执行多条任务
+- 直接按要求修改某个文本文件
 
-```bash
-# 推荐：pip editable 安装（安装后可直接使用 llm 命令）
-pip install -e ~/.claude/skills/llm
-
-# 或直接运行脚本（向后兼容）
-python3 ~/.claude/skills/llm/llm.py
-```
-
-## 单次调用
-
-### 对话
+## chat
 
 ```bash
 llm chat "写一段产品介绍"
@@ -47,15 +37,17 @@ llm chat "按要求改写" --edit 商务女性生图.md -o 商务女性生图.v2
 ```
 
 规则：
+
 - `prompt` 支持字面量或 `@文件`
 - `-s/--system` 支持字面量或 `@文件`
 - `-i/--input` 可重复传入多个文本文件，作为补充上下文
-- `-r/--reference` 可传入一张图片，用于视觉理解/图片分析
-- `--edit` 用于编辑目标文本文件；模型必须输出 SEARCH/REPLACE diff blocks，CLI 会自动应用
+- `-r/--reference` 可传入一张图片，用于视觉理解或图片分析
+- `--edit` 用于编辑目标文本文件
+- `--edit` 模式下，模型必须输出 `SEARCH/REPLACE` diff blocks，CLI 自动应用 diff
 - `--edit` 不带 `-o` 时直接覆盖原文件；带 `-o` 时输出到新文件
 - 非 edit 模式下，有 `-o` 时写入文件；无 `-o` 时输出到终端
 
-### 图片
+## image
 
 ```bash
 llm image "画一只猫"
@@ -66,6 +58,7 @@ llm image "生成三张海报方案" -n 3 -o poster.jpg
 ```
 
 规则：
+
 - `prompt` 支持字面量或 `@文件`
 - `-s/--system` 支持字面量或 `@文件`
 - `-r/--reference` 为可选参考图
@@ -74,7 +67,7 @@ llm image "生成三张海报方案" -n 3 -o poster.jpg
 - `-o poster.jpg -n 3` 时会输出为 `poster.jpg`、`poster_1.jpg`、`poster_2.jpg`
 - 无 `-o` 时，默认输出到当前目录下的 `gemini-output/output_时间戳.jpg`
 
-### 音频
+## audio
 
 ```bash
 llm audio demo.mp3
@@ -84,21 +77,20 @@ llm audio demo.mp3 -p "请转成带说话人标注的 SRT" -s @system.txt
 ```
 
 规则：
+
 - 主位置参数必须是音频文件路径
 - `-p/--prompt` 为可选附加要求，支持字面量或 `@文件`
 - `-s/--system` 支持字面量或 `@文件`
 - 无 `-o` 时，默认输出为音频同目录同名 `.srt`
 
-## YAML 编排模式
+## batch
 
 ```bash
 llm batch tasks.yaml
 ```
 
-> [!note]
-> 只有 `batch` 子命令才会进入 YAML 模式。
-
 执行时会输出：
+
 - 上游地址
 - 任务总数和并发数
 - 每个任务的开始和完成状态（含使用的模型）
@@ -123,8 +115,7 @@ tasks:
 
   - id: hero-image
     mode: image
-    prompt: "为产品主页生成一张极简横幅图"
-    system_prompt: "@prompts/image-system.txt"
+    prompt: "为产品主页生成三张极简横幅图"
     count: 3
     output: hero.jpg
 
@@ -133,11 +124,8 @@ tasks:
     audio_file: meeting.mp3
     prompt: "请输出标准 SRT 字幕"
 ```
-```
 
-### YAML 字段说明
-
-**顶层字段**（全局配置）
+### YAML 顶层字段
 
 | 字段 | 必填 | 说明 | 可被 task 覆盖 |
 |------|------|------|----------------|
@@ -153,7 +141,7 @@ tasks:
 | `max_output_tokens` | | 最大输出 token 数 | ✓ |
 | `tasks` | ✓ | 任务数组，不能为空 | - |
 
-**task 字段**（任务级配置）
+### YAML task 字段
 
 | 字段 | 必填 | 适用模式 | 说明 |
 |------|------|----------|------|
@@ -189,39 +177,33 @@ BASE_URL=https://your-api-endpoint/v1
 | audio | `LLM_AUDIO_MODEL` → `LLM_MODEL` → `GEMINI_AUDIO_MODEL` |
 
 并发优先级：
+
 - 顶层 YAML `concurrency`
 - `LLM_CONCURRENCY`
 - 兼容旧变量（仅单一任务类型 batch 时生效）
 - 默认 `4`
 
-## 高级选项
-
-以下参数保留用于高级控制，不作为主示例默认写法：
-- `-t, --temperature`
-- `-m, --max-output-tokens`
-- `--model`
-
 ## 常见错误
 
 | 问题 | 原因 | 正确方式 |
 |------|------|----------|
-| 把 YAML 文件直接传给 `chat` | 误以为会自动进入 batch | 使用 `batch tasks.yaml` |
+| 把 YAML 文件直接传给 `chat` | `chat` 只处理单次任务 | 使用 `batch tasks.yaml` |
 | audio 命令把文本写成第二个位置参数 | audio 只接受音频文件位置参数 | 用 `-p "你的要求"` |
 | image/chat 想从文件读取 prompt 但直接写路径 | 未使用 `@` 前缀 | 用 `@prompt.txt` |
 | 想编辑文本文件却传给 `-r` | `-r` 仅支持图片参考 | 用 `--edit file.md` |
 | batch 中 audio 任务写成 `audio` 字段 | 字段名不对 | 使用 `audio_file` |
 
-## --debug 位置自由
+## --debug
 
 `--debug` 可以放在任意位置：
 
 ```bash
-llm --debug chat "test"       # group 级别
-llm chat --debug "test"       # command 级别（中间）
-llm chat "test" --debug       # command 级别（末尾）
+llm --debug chat "test"
+llm chat --debug "test"
+llm chat "test" --debug
 ```
 
-## 输出规则速查
+## 默认输出规则
 
 | 模式 | 未指定输出时 |
 |------|--------------|
