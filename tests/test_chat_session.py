@@ -1,4 +1,5 @@
 import os
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,7 +8,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from llm_cli.cli import cli
-from llm_cli.interactive import InteractiveChatState
+from llm_cli.interactive import InteractiveChatState, _TranscriptLexer
 
 
 class ChatSessionTests(unittest.TestCase):
@@ -138,14 +139,18 @@ class ChatSessionTests(unittest.TestCase):
             ],
         )
 
-        self.assertIn("你> 旧问题", state.transcript_text)
-        self.assertIn("AI> 旧回答", state.transcript_text)
+        self.assertIn("旧问题", state.transcript_text)
+        self.assertIn("旧回答", state.transcript_text)
         toolbar = state.toolbar_fragments()
+        status_bar = state.status_fragments()
         toolbar_text = "".join(part for _, part in toolbar)
+        status_text = "".join(part for _, part in status_bar)
         self.assertIn("模型: test-model", toolbar_text)
         self.assertIn("消息: 2", toolbar_text)
         self.assertIn("会话: demo", toolbar_text)
-        self.assertIn("状态: 空闲", toolbar_text)
+        self.assertIn("状态: 已就绪", status_text)
+        self.assertIn("阶段: 空闲", status_text)
+        self.assertIn("上轮耗时: -", status_text)
 
     def test_state_streaming_updates_status_and_transcript(self):
         state = InteractiveChatState(
@@ -155,16 +160,70 @@ class ChatSessionTests(unittest.TestCase):
         )
 
         state.begin_assistant_response()
-        toolbar_text = "".join(part for _, part in state.toolbar_fragments())
-        self.assertIn("状态: 等待首字", toolbar_text)
+        status_text = "".join(part for _, part in state.status_fragments())
+        self.assertIn("状态: 等待首字", status_text)
+        self.assertIn("本轮耗时:", status_text)
 
         state.write_assistant_chunk("第一段")
         state.write_assistant_chunk("第二段")
         state.finish_assistant_response()
 
-        toolbar_text = "".join(part for _, part in state.toolbar_fragments())
-        self.assertIn("状态: 空闲", toolbar_text)
-        self.assertIn("AI> 第一段第二段", state.transcript_text)
+        status_text = "".join(part for _, part in state.status_fragments())
+        self.assertIn("状态: 已就绪", status_text)
+        self.assertIn("阶段: 回复完成", status_text)
+        self.assertIn("上轮耗时:", status_text)
+        self.assertIn("第一段第二段", state.transcript_text)
+
+    def test_state_tracks_restore_duration(self):
+        state = InteractiveChatState(
+            model="test-model",
+            session_path=Path("/tmp/demo.jsonl"),
+            history_messages=[],
+        )
+
+        state.begin_restore()
+        time.sleep(0.01)
+        state.finish_restore()
+
+        status_text = "".join(part for _, part in state.status_fragments())
+        self.assertIn("状态: 已就绪", status_text)
+        self.assertIn("阶段: 恢复完成", status_text)
+        self.assertIn("恢复耗时:", status_text)
+
+    def test_transcript_fragments_separate_role_and_content_styles(self):
+        state = InteractiveChatState(
+            model="test-model",
+            session_path=Path("/tmp/demo.jsonl"),
+            history_messages=[],
+        )
+
+        state.append_message("user", "用户消息")
+        state.append_message("assistant", "助手消息")
+        state.append_message("system", "系统消息")
+
+        fragments = state.transcript_fragments()
+
+        self.assertIn(("class:role.user", "你  "), fragments)
+        self.assertIn(("class:role.assistant", "AI  "), fragments)
+        self.assertIn(("class:role.system", "系统"), fragments)
+        self.assertIn(("class:message.user", "用户消息"), fragments)
+        self.assertIn(("class:message.assistant", "助手消息"), fragments)
+        self.assertIn(("class:message.system", "系统消息"), fragments)
+
+    def test_transcript_lexer_colors_role_prefixes(self):
+        from prompt_toolkit.document import Document
+
+        lexer = _TranscriptLexer()
+        get_line = lexer.lex_document(
+            Document(
+                text="你  用户消息\nAI  助手消息\n系统系统消息\n普通文本",
+            )
+        )
+
+        self.assertEqual(get_line(0), [("class:role.user", "你  "), ("class:message.user", "用户消息")])
+        self.assertEqual(get_line(1), [("class:role.assistant", "AI  "), ("class:message.assistant", "助手消息")])
+        self.assertEqual(get_line(2), [("class:role.system", "系统"), ("class:message.system", "系统消息")])
+        self.assertEqual(get_line(3), [("", "普通文本")])
 
     def test_session_name_resolves_to_jsonl_in_current_directory(self):
         from llm_cli.session import resolve_session_path

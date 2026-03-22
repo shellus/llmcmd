@@ -144,7 +144,8 @@ llm chat -I -s ./sessions/product-review.jsonl
 - 单次模式和 `-I` 交互模式可共享同一个会话文件，随时切换继续
 - `llm chat -I "首轮问题"` 会先发送这条首轮消息，再进入连续对话
 - `-I` 模式下会先回放历史消息，响应流式打印到终端，按 `Ctrl+C` 结束
-- `-I` 基于 `prompt_toolkit Application` 提供消息区、输入区和常驻状态栏
+- `-I` 基于 `prompt_toolkit Application` 提供消息区、输入区、输入框上方常驻交互状态行和底部元信息栏
+- 历史消息中的 `你 / AI / 系统` 角色标签会独立着色，便于快速分辨轮次边界
 - 当前持久会话先聚焦连续文本对话，不与 `-i/-r/--edit/--system` 组合
 
 ### `llm image`
