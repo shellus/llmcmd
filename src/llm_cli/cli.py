@@ -126,7 +126,7 @@ def cli():
 )
 @click.argument("prompt", required=False, default=None, metavar="[PROMPT|@FILE]")
 @click.option("-i", "--input", "input_files", multiple=True, help="补充上下文文本文件，可重复传入多个")
-@click.option("-r", "--reference", default=None, help="参考图片路径（仅图片），用于视觉理解")
+@click.option("-r", "--reference", multiple=True, help="参考图片路径（仅图片），用于视觉理解，可重复传入")
 @click.option("--edit", "edit_path", default=None, help="编辑目标文本文件；模型将输出 diff 并自动应用")
 @click.option("-s", "--session", "session_name", default=None, help="加载/持久化对话历史；可传会话名或 JSONL 路径")
 @click.option("--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
@@ -187,7 +187,7 @@ def chat(prompt, input_files, reference, edit_path, session_name, system, intera
 """
 )
 @click.argument("prompt", metavar="PROMPT|@FILE")
-@click.option("-r", "--reference", default=None, help="参考图片路径（仅图片）")
+@click.option("-r", "--reference", multiple=True, help="参考图片路径（仅图片），可重复传入")
 @click.option("-s", "--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
 @click.option("-o", "--output", default=None, help="输出路径")
 @click.option("-n", "--count", type=int, default=1, show_default=True, help="生成数量；会遵循 image 模式并发配置")

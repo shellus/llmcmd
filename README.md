@@ -57,6 +57,7 @@ llm chat "按要求改写" --edit prompt.md -o prompt.v2.md
 
 ```bash
 llm chat "详细描述这张图的所有细节" -r photo.jpg
+llm chat "对比两张参考图后总结共同特征" -r photo-a.jpg -r photo-b.jpg
 llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
 ```
 
@@ -64,6 +65,7 @@ llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
 
 ```bash
 llm image "生成三张海报方案" -n 3 -o poster.jpg
+llm image "融合两张参考图的风格生成情侣自拍" -r person.jpg -r style.jpg -o couple.jpg
 ```
 
 输出结果示例：

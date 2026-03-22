@@ -11,6 +11,23 @@ from llm_cli.interactive import InteractiveChatState
 
 
 class ChatSessionTests(unittest.TestCase):
+    def test_image_command_passes_all_references_to_run_task(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-image-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["reference"] = kwargs["reference"]
+            return {"mode": mode, "output_paths": ["/tmp/result.jpg"], "printed": False}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["image", "测试", "-r", "first.jpg", "-r", "second.jpg"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["reference"], ("first.jpg", "second.jpg"))
+
     def test_single_chat_with_session_loads_history_and_appends(self):
         with TemporaryDirectory() as tmp:
             session_path = Path(tmp) / "demo.jsonl"
@@ -145,6 +162,24 @@ class ChatSessionTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             resolved = resolve_session_path("./sessions/demo.jsonl", cwd=tmp)
             self.assertEqual(resolved, (Path(tmp) / "sessions" / "demo.jsonl").resolve())
+
+    def test_build_messages_keeps_multiple_reference_images_for_image_mode(self):
+        from llm_cli.messages import build_messages
+
+        with TemporaryDirectory() as tmp:
+            first = Path(tmp) / "first.jpg"
+            second = Path(tmp) / "second.jpg"
+            first.write_bytes(b"first-image")
+            second.write_bytes(b"second-image")
+
+            messages = build_messages("image", prompt="测试提示词", reference_path=[str(first), str(second)])
+
+        self.assertEqual(len(messages), 1)
+        content = messages[0]["content"]
+        image_parts = [part for part in content if part["type"] == "image_url"]
+        text_parts = [part for part in content if part["type"] == "text"]
+        self.assertEqual(len(image_parts), 2)
+        self.assertEqual(text_parts, [{"type": "text", "text": "测试提示词"}])
 
 
 if __name__ == "__main__":

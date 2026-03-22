@@ -33,6 +33,13 @@ DEFAULT_EDIT_PROMPT = """你是一个严谨的文本编辑助手。你会收到�
 
 
 def build_messages(mode, prompt, system_prompt=None, input_text=None, reference_path=None, audio_path=None):
+    if reference_path is None:
+        reference_paths = []
+    elif isinstance(reference_path, (list, tuple)):
+        reference_paths = list(reference_path)
+    else:
+        reference_paths = [reference_path]
+
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -46,8 +53,8 @@ def build_messages(mode, prompt, system_prompt=None, input_text=None, reference_
             f"# 原始文件内容\n\n{input_text}",
         ]
         content = [{"type": "text", "text": join_message_parts(*user_parts)}]
-        if reference_path:
-            attachment = load_binary_attachment(reference_path, "image")
+        for path in reference_paths:
+            attachment = load_binary_attachment(path, "image")
             content.append(
                 {
                     "type": "image_url",
@@ -61,21 +68,22 @@ def build_messages(mode, prompt, system_prompt=None, input_text=None, reference_
 
     message_text = join_message_parts(prompt, input_text)
     if mode in {"chat", "text"}:
-        if not message_text and not reference_path:
+        if not message_text and not reference_paths:
             fail("chat 模式至少需要 prompt、input 或 reference")
-        if reference_path:
-            attachment = load_binary_attachment(reference_path, "image")
+        if reference_paths:
             content = []
             if message_text:
                 content.append({"type": "text", "text": message_text})
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{attachment['mime_type']};base64,{attachment['base64_data']}"
-                    },
-                }
-            )
+            for path in reference_paths:
+                attachment = load_binary_attachment(path, "image")
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{attachment['mime_type']};base64,{attachment['base64_data']}"
+                        },
+                    }
+                )
             messages.append({"role": "user", "content": content})
         else:
             messages.append({"role": "user", "content": message_text})
@@ -84,17 +92,19 @@ def build_messages(mode, prompt, system_prompt=None, input_text=None, reference_
     if mode == "image":
         if not message_text:
             fail("image 模式至少需要 prompt")
-        if reference_path:
-            attachment = load_binary_attachment(reference_path, "image")
-            content = [
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{attachment['mime_type']};base64,{attachment['base64_data']}"
-                    },
-                },
-                {"type": "text", "text": message_text},
-            ]
+        if reference_paths:
+            content = []
+            for path in reference_paths:
+                attachment = load_binary_attachment(path, "image")
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{attachment['mime_type']};base64,{attachment['base64_data']}"
+                        },
+                    }
+                )
+            content.append({"type": "text", "text": message_text})
             messages.append({"role": "user", "content": content})
         else:
             messages.append({"role": "user", "content": message_text})

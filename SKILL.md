@@ -44,7 +44,7 @@ llm chat "按要求改写" --edit 商务女性生图.md -o 商务女性生图.v2
 - `prompt` 支持字面量或 `@文件`
 - `--system` 支持字面量或 `@文件`
 - `-i/--input` 可重复传入多个文本文件，作为补充上下文
-- `-r/--reference` 可传入一张图片，用于视觉理解或图片分析
+- `-r/--reference` 可重复传入多张图片，用于视觉理解或图片分析
 - `-s/--session` 用于加载并持久化 JSONL 对话历史，可传会话名或文件路径
 - `-I/--interactive` 进入交互式连续对话，默认持久化到当前目录 `.llm-chat.jsonl`
 - `llm chat -I "首轮问题"` 会先发送这条首轮消息，再进入连续对话
@@ -64,6 +64,7 @@ llm image "画一只猫"
 llm image @prompt.txt -o cat.jpg
 llm image "保留主体，改成极简插画风格" -r photo.jpg
 llm image @prompt.txt -r ref.png -s @system.txt -o result.jpg
+llm image "融合两张参考图" -r ref-a.jpg -r ref-b.jpg -o result.jpg
 llm image "生成三张海报方案" -n 3 -o poster.jpg
 ```
 
@@ -71,7 +72,7 @@ llm image "生成三张海报方案" -n 3 -o poster.jpg
 
 - `prompt` 支持字面量或 `@文件`
 - `-s/--system` 支持字面量或 `@文件`
-- `-r/--reference` 为可选参考图
+- `-r/--reference` 为可选参考图，可重复传入多张
 - `-n/--count` 用于控制生成数量，单命令多图会遵循 image 模式并发配置
 - 多图模式会输出轻量进度：开始、每张完成、最终写入结果
 - `-o poster.jpg -n 3` 时会输出为 `poster.jpg`、`poster_1.jpg`、`poster_2.jpg`

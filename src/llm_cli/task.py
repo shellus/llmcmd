@@ -50,7 +50,10 @@ def run_task(
 
     reference_path = None
     if reference:
-        reference_path = str(resolve_path(reference, base_dir=base_dir))
+        if isinstance(reference, (list, tuple)):
+            reference_path = [str(resolve_path(item, base_dir=base_dir)) for item in reference]
+        else:
+            reference_path = [str(resolve_path(reference, base_dir=base_dir))]
     audio_path = None
     if audio_file:
         audio_path = str(resolve_path(audio_file, base_dir=base_dir))
