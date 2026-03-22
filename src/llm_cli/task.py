@@ -12,6 +12,7 @@ def run_task(
     client,
     model,
     *,
+    messages=None,
     prompt=None,
     system_prompt=None,
     input_paths=None,
@@ -25,10 +26,16 @@ def run_task(
     image_count=1,
     config=None,
     progress_callback=None,
+    stream_handler=None,
 ):
-    prompt_text = resolve_text(prompt, base_dir=base_dir)
-    system_text = resolve_text(system_prompt, base_dir=base_dir)
-    input_text = read_input_files(input_paths or [], base_dir=base_dir)
+    if messages is None:
+        prompt_text = resolve_text(prompt, base_dir=base_dir)
+        system_text = resolve_text(system_prompt, base_dir=base_dir)
+        input_text = read_input_files(input_paths or [], base_dir=base_dir)
+    else:
+        prompt_text = None
+        system_text = None
+        input_text = None
 
     edit_source_text = None
     edit_source_path = None
@@ -48,14 +55,15 @@ def run_task(
     if audio_file:
         audio_path = str(resolve_path(audio_file, base_dir=base_dir))
 
-    messages = build_messages(
-        effective_mode,
-        prompt=prompt_text,
-        system_prompt=system_text,
-        input_text=input_text,
-        reference_path=reference_path,
-        audio_path=audio_path,
-    )
+    if messages is None:
+        messages = build_messages(
+            effective_mode,
+            prompt=prompt_text,
+            system_prompt=system_text,
+            input_text=input_text,
+            reference_path=reference_path,
+            audio_path=audio_path,
+        )
 
     response = api_call(
         client,
@@ -63,6 +71,7 @@ def run_task(
         messages,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
+        stream_handler=stream_handler,
     )
 
     if mode == "image":

@@ -14,7 +14,7 @@ def debug_log(*args, **kwargs):
         print("[DEBUG]", *args, **kwargs, file=sys.stderr)
 
 
-def api_call(client, model, messages, temperature=None, max_output_tokens=None):
+def api_call(client, model, messages, temperature=None, max_output_tokens=None, stream_handler=None):
     kwargs = {
         "model": model,
         "messages": messages,
@@ -46,6 +46,36 @@ def api_call(client, model, messages, temperature=None, max_output_tokens=None):
         debug_log("请求 URL:", request_url)
         debug_log("请求参数:", json.dumps(debug_kwargs, ensure_ascii=False, indent=2))
 
+    if stream_handler:
+        kwargs["stream"] = True
+        stream = client.chat.completions.create(**kwargs)
+
+        content_parts = []
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                delta = chunk.choices[0].delta.content
+                content_parts.append(delta)
+                stream_handler(delta)
+
+        full_content = "".join(content_parts)
+        if DEBUG:
+            debug_log("流式收集 content:", repr(full_content[:500]))
+
+        class FakeMessage:
+            def __init__(self, content):
+                self.content = content
+                self.images = None
+
+        class FakeChoice:
+            def __init__(self, message):
+                self.message = message
+
+        class FakeResponse:
+            def __init__(self, content):
+                self.choices = [FakeChoice(FakeMessage(content))]
+
+        return FakeResponse(full_content)
+
     try:
         response = client.chat.completions.create(**kwargs)
         if DEBUG:
@@ -68,7 +98,6 @@ def api_call(client, model, messages, temperature=None, max_output_tokens=None):
         if DEBUG:
             debug_log("流式收集 content:", repr(full_content[:500]))
 
-        # 构造兼容响应对象
         class FakeMessage:
             def __init__(self, content):
                 self.content = content

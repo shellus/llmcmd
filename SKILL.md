@@ -30,7 +30,10 @@ description: Use when text generation, image generation or editing, audio transc
 llm chat "写一段产品介绍"
 llm chat @prompt.txt -o result.md
 llm chat "总结重点" -i article.md -i notes.md
-llm chat "整理为 JSON" -s @system.txt
+llm chat "整理为 JSON" --system @system.txt
+llm chat "继续补充这个方案" -s demo
+llm chat -I -s demo
+llm chat -I "你是什么模型？"
 llm chat "详细描述这张图的所有细节" -r photo.jpg
 llm chat "把人物脸型改成偏瘦" --edit 商务女性生图.md
 llm chat "按要求改写" --edit 商务女性生图.md -o 商务女性生图.v2.md
@@ -39,13 +42,20 @@ llm chat "按要求改写" --edit 商务女性生图.md -o 商务女性生图.v2
 规则：
 
 - `prompt` 支持字面量或 `@文件`
-- `-s/--system` 支持字面量或 `@文件`
+- `--system` 支持字面量或 `@文件`
 - `-i/--input` 可重复传入多个文本文件，作为补充上下文
 - `-r/--reference` 可传入一张图片，用于视觉理解或图片分析
+- `-s/--session` 用于加载并持久化 JSONL 对话历史，可传会话名或文件路径
+- `-I/--interactive` 进入交互式连续对话，默认持久化到当前目录 `.llm-chat.jsonl`
+- `llm chat -I "首轮问题"` 会先发送这条首轮消息，再进入连续对话
+- 单次 `chat` 与 `-I` 交互模式可以共享同一个会话文件并来回切换
+- `-I` 模式下会先回放历史消息，响应流式输出到终端，按 `Ctrl+C` 结束
+- `-I` 基于 `prompt_toolkit Application` 提供消息区、输入区和常驻状态栏
 - `--edit` 用于编辑目标文本文件
 - `--edit` 模式下，模型必须输出 `SEARCH/REPLACE` diff blocks，CLI 自动应用 diff
 - `--edit` 不带 `-o` 时直接覆盖原文件；带 `-o` 时输出到新文件
 - 非 edit 模式下，有 `-o` 时写入文件；无 `-o` 时输出到终端
+- 当前持久会话模式先专注文本连续对话，不与 `-i/-r/--edit/--system` 组合
 
 ## image
 

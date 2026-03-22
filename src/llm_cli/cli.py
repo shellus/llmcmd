@@ -3,9 +3,11 @@ import click
 from . import api
 from .batch import run_batch
 from .config import create_client
+from .interactive import run_interactive_chat
 from .messages import DEFAULT_AUDIO_PROMPT
+from .session import append_session_messages, load_session_messages, resolve_session_path
 from .task import run_task
-from .utils import fail
+from .utils import fail, resolve_text
 
 
 def _set_debug(ctx, param, value):
@@ -32,6 +34,78 @@ def _image_progress(event, **payload):
         print(f"[{payload['completed']}/{payload['total']}] 已完成")
 
 
+def _render_text_result(result):
+    if result.get("output_path"):
+        print(f"已写入: {result['output_path']}")
+    else:
+        print(result["text"])
+
+
+def _stream_to_stdout(chunk):
+    click.echo(chunk, nl=False)
+
+
+def _run_chat_once(
+    client,
+    resolved_model,
+    *,
+    prompt,
+    input_files,
+    reference,
+    edit_path,
+    system,
+    output,
+    temperature,
+    max_output_tokens,
+    session_path=None,
+):
+    history_messages = load_session_messages(session_path) if session_path else []
+    if history_messages and (system or input_files or reference or edit_path):
+        fail("持久会话模式暂不支持与 --system/-i/-r/--edit 组合使用")
+
+    task_kwargs = {
+        "prompt": prompt,
+        "system_prompt": system,
+        "input_paths": input_files,
+        "reference": reference,
+        "output": output,
+        "temperature": temperature,
+        "max_output_tokens": max_output_tokens,
+        "edit_path": edit_path,
+    }
+    user_message = None
+    if session_path:
+        if edit_path:
+            fail("持久会话模式暂不支持 --edit")
+        if reference:
+            fail("持久会话模式暂不支持 -r/--reference")
+        if input_files:
+            fail("持久会话模式暂不支持 -i/--input")
+        if system:
+            fail("持久会话模式暂不支持 --system")
+        prompt_text = resolve_text(prompt)
+        if not prompt_text:
+            fail("持久会话模式至少需要 prompt")
+        user_message = {"role": "user", "content": prompt_text}
+        task_kwargs = {
+            "messages": [*history_messages, user_message],
+            "output": output,
+            "temperature": temperature,
+            "max_output_tokens": max_output_tokens,
+        }
+
+    result = _run_safely(
+        run_task,
+        "chat",
+        client,
+        resolved_model,
+        **task_kwargs,
+    )
+    if session_path:
+        append_session_messages(session_path, [user_message, {"role": "assistant", "content": result["text"]}])
+    return result
+
+
 @click.group(context_settings=dict(help_option_names=["-h", "--help"]))
 @click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
 def cli():
@@ -54,13 +128,15 @@ def cli():
 @click.option("-i", "--input", "input_files", multiple=True, help="补充上下文文本文件，可重复传入多个")
 @click.option("-r", "--reference", default=None, help="参考图片路径（仅图片），用于视觉理解")
 @click.option("--edit", "edit_path", default=None, help="编辑目标文本文件；模型将输出 diff 并自动应用")
-@click.option("-s", "--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
+@click.option("-s", "--session", "session_name", default=None, help="加载/持久化对话历史；可传会话名或 JSONL 路径")
+@click.option("--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
+@click.option("-I", "--interactive", is_flag=True, help="进入交互式连续对话，并默认持久化到当前路径")
 @click.option("-o", "--output", default=None, help="输出路径；edit 模式下不传则直接覆盖原文件")
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
-def chat(prompt, input_files, reference, edit_path, system, output, model, temperature, max_output_tokens):
+def chat(prompt, input_files, reference, edit_path, session_name, system, interactive, output, model, temperature, max_output_tokens):
     """对话/文本生成。
 
     PROMPT 支持直接传字面量，也支持使用 @文件路径 从文件读取。
@@ -69,25 +145,36 @@ def chat(prompt, input_files, reference, edit_path, system, output, model, tempe
     """
     if edit_path and not prompt:
         fail("chat edit 模式需要提供修改要求 prompt")
+    if interactive and output:
+        fail("交互式对话不支持 --output")
     client, resolved_model, _ = create_client("chat", explicit_model=model)
-    result = _run_safely(
-        run_task,
-        "chat",
+    session_path = resolve_session_path(session_name, interactive=interactive) if (interactive or session_name is not None) else None
+    if interactive:
+        run_interactive_chat(
+            client=client,
+            model=resolved_model,
+            prompt=prompt,
+            session_path=session_path,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            history_messages=load_session_messages(session_path),
+        )
+        return
+
+    result = _run_chat_once(
         client,
         resolved_model,
         prompt=prompt,
-        system_prompt=system,
-        input_paths=input_files,
+        input_files=input_files,
         reference=reference,
+        edit_path=edit_path,
+        system=system,
         output=output,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
-        edit_path=edit_path,
+        session_path=session_path,
     )
-    if result.get("output_path"):
-        print(f"已写入: {result['output_path']}")
-    else:
-        print(result["text"])
+    _render_text_result(result)
 
 
 @cli.command(
@@ -196,4 +283,3 @@ def batch(yaml_path):
 
 if __name__ == "__main__":
     cli()
-
