@@ -66,6 +66,7 @@ llm image "保留主体，改成极简插画风格" -r photo.jpg
 llm image @prompt.txt -r ref.png -s @system.txt -o result.jpg
 llm image @prompt.txt -i constraints.md -r ref.png -o result.jpg
 llm image "融合两张参考图" -r ref-a.jpg -r ref-b.jpg -o result.jpg
+llm image @prompts/couple-photo.md -i prompts/keep-outfit-and-accessories.md -r refs/person-a.jpg -r refs/person-b.jpg -o outputs/couple-photo/result.jpg -n 4
 llm image "生成三张海报方案" -n 3 -o poster.jpg
 ```
 

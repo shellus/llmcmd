@@ -67,6 +67,7 @@ llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
 llm image "生成三张海报方案" -n 3 -o poster.jpg
 llm image "融合两张参考图的风格生成情侣自拍" -r person.jpg -r style.jpg -o couple.jpg
 llm image @prompt.md -i constraints.md -r person.jpg -o result.jpg
+llm image @prompts/couple-photo.md -i prompts/keep-outfit-and-accessories.md -r refs/person-a.jpg -r refs/person-b.jpg -o outputs/couple-photo/result.jpg -n 4
 ```
 
 输出结果示例：
@@ -211,3 +212,7 @@ OPENAI_IMAGE_CONCURRENCY=4
 ## 详细文档
 
 更完整的参数说明、YAML 字段说明和行为规则，请查看 [SKILL.md](./SKILL.md)。
+
+开发维护时可参考：
+
+- [llm CLI 技术设计](./docs/dev-spec/llm-cli技术设计.md)
