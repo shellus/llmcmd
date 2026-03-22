@@ -64,6 +64,7 @@ llm image "画一只猫"
 llm image @prompt.txt -o cat.jpg
 llm image "保留主体，改成极简插画风格" -r photo.jpg
 llm image @prompt.txt -r ref.png -s @system.txt -o result.jpg
+llm image @prompt.txt -i constraints.md -r ref.png -o result.jpg
 llm image "融合两张参考图" -r ref-a.jpg -r ref-b.jpg -o result.jpg
 llm image "生成三张海报方案" -n 3 -o poster.jpg
 ```
@@ -71,6 +72,7 @@ llm image "生成三张海报方案" -n 3 -o poster.jpg
 规则：
 
 - `prompt` 支持字面量或 `@文件`
+- `-i/--input` 可重复传入多个文本文件，作为补充约束
 - `-s/--system` 支持字面量或 `@文件`
 - `-r/--reference` 为可选参考图，可重复传入多张
 - `-n/--count` 用于控制生成数量，单命令多图会遵循 image 模式并发配置

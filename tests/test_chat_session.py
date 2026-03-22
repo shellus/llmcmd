@@ -28,6 +28,23 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(captured["reference"], ("first.jpg", "second.jpg"))
 
+    def test_image_command_passes_input_files_to_run_task(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-image-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["input_paths"] = kwargs["input_paths"]
+            return {"mode": mode, "output_paths": ["/tmp/result.jpg"], "printed": False}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["image", "测试", "-i", "constraint-a.md", "-i", "constraint-b.md"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["input_paths"], ("constraint-a.md", "constraint-b.md"))
+
     def test_single_chat_with_session_loads_history_and_appends(self):
         with TemporaryDirectory() as tmp:
             session_path = Path(tmp) / "demo.jsonl"
@@ -180,6 +197,15 @@ class ChatSessionTests(unittest.TestCase):
         text_parts = [part for part in content if part["type"] == "text"]
         self.assertEqual(len(image_parts), 2)
         self.assertEqual(text_parts, [{"type": "text", "text": "测试提示词"}])
+
+    def test_build_messages_merges_image_prompt_and_input_text(self):
+        from llm_cli.messages import build_messages
+
+        messages = build_messages("image", prompt="主要求", input_text="补充约束")
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["role"], "user")
+        self.assertEqual(messages[0]["content"], "主要求\n\n补充约束")
 
 
 if __name__ == "__main__":

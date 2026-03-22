@@ -182,11 +182,13 @@ def chat(prompt, input_files, reference, edit_path, session_name, system, intera
 使用示例:
   llm image "画一只赛博朋克风格的猫"
   llm image "把这张图变成水彩风" -r ref.jpg
+  llm image @prompt.txt -i constraints.md -r ref.jpg -o result.jpg
   llm image "生成海报" -o poster.jpg
   llm image "生成三张海报方案" -n 3 -o poster.jpg
 """
 )
 @click.argument("prompt", metavar="PROMPT|@FILE")
+@click.option("-i", "--input", "input_files", multiple=True, help="补充上下文文本文件，可重复传入多个")
 @click.option("-r", "--reference", multiple=True, help="参考图片路径（仅图片），可重复传入")
 @click.option("-s", "--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
 @click.option("-o", "--output", default=None, help="输出路径")
@@ -195,11 +197,11 @@ def chat(prompt, input_files, reference, edit_path, session_name, system, intera
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
-def image(prompt, reference, system, output, count, model, temperature, max_output_tokens):
+def image(prompt, input_files, reference, system, output, count, model, temperature, max_output_tokens):
     """图片生成或参考图编辑。
 
     PROMPT 为必填，支持直接传字面量，也支持使用 @文件路径 从文件读取。
-    可选 -r 传入参考图（仅图片），进行参考图编辑或风格迁移。
+    可选 -i 传入补充文本约束文件，可选 -r 传入参考图（仅图片），进行参考图编辑或风格迁移。
     通过 -n/--count 指定生成数量，单次多图会遵循 image 模式并发配置。
     """
     if not prompt:
@@ -214,6 +216,7 @@ def image(prompt, reference, system, output, count, model, temperature, max_outp
         resolved_model,
         prompt=prompt,
         system_prompt=system,
+        input_paths=input_files,
         reference=reference,
         output=output,
         temperature=temperature,

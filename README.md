@@ -66,6 +66,7 @@ llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
 ```bash
 llm image "生成三张海报方案" -n 3 -o poster.jpg
 llm image "融合两张参考图的风格生成情侣自拍" -r person.jpg -r style.jpg -o couple.jpg
+llm image @prompt.md -i constraints.md -r person.jpg -o result.jpg
 ```
 
 输出结果示例：
