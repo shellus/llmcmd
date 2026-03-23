@@ -8,7 +8,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from llm_cli.cli import cli
-from llm_cli.interactive import InteractiveChatState, _TranscriptLexer
+from llm_cli.interactive import InteractiveChatState, _TranscriptLexer, run_interactive_chat
 
 
 class ChatSessionTests(unittest.TestCase):
@@ -129,6 +129,53 @@ class ChatSessionTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(captured["session_path"], (Path(tmp) / ".llm-chat.jsonl").resolve())
 
+    def test_run_interactive_chat_counts_loaded_history_in_toolbar(self):
+        captured = {}
+
+        class DummyApp:
+            def run(self, pre_run=None):
+                if pre_run:
+                    pre_run()
+
+            def invalidate(self):
+                return None
+
+            def create_background_task(self, coro):
+                captured["background_task"] = coro
+
+        class DummyBuffer:
+            def set_document(self, document, bypass_readonly=False):
+                captured["synced_text"] = document.text
+
+        class DummyOutputArea:
+            def __init__(self):
+                self.buffer = DummyBuffer()
+
+        def fake_create_application(state, *, on_submit):
+            captured["message_count"] = state.message_count
+            captured["transcript_text"] = state.transcript_text
+            return DummyApp(), DummyOutputArea()
+
+        history_messages = [
+            {"role": "user", "content": "旧问题"},
+            {"role": "assistant", "content": "旧回答"},
+        ]
+
+        with patch("llm_cli.interactive._create_application", fake_create_application):
+            run_interactive_chat(
+                client=object(),
+                model="test-model",
+                prompt=None,
+                session_path=Path("/tmp/demo.jsonl"),
+                temperature=None,
+                max_output_tokens=None,
+                history_messages=history_messages,
+            )
+
+        self.assertEqual(captured["message_count"], 2)
+        self.assertIn("旧问题", captured["transcript_text"])
+        self.assertIn("旧回答", captured["transcript_text"])
+
     def test_state_replays_history_and_updates_toolbar(self):
         state = InteractiveChatState(
             model="test-model",
@@ -148,9 +195,7 @@ class ChatSessionTests(unittest.TestCase):
         self.assertIn("模型: test-model", toolbar_text)
         self.assertIn("消息: 2", toolbar_text)
         self.assertIn("会话: demo", toolbar_text)
-        self.assertIn("状态: 已就绪", status_text)
-        self.assertIn("阶段: 空闲", status_text)
-        self.assertIn("上轮耗时: -", status_text)
+        self.assertIn("·· ○ idle  -", status_text)
 
     def test_state_streaming_updates_status_and_transcript(self):
         state = InteractiveChatState(
@@ -161,17 +206,16 @@ class ChatSessionTests(unittest.TestCase):
 
         state.begin_assistant_response()
         status_text = "".join(part for _, part in state.status_fragments())
-        self.assertIn("状态: 等待首字", status_text)
-        self.assertIn("本轮耗时:", status_text)
+        self.assertIn("·· ↻ wait", status_text)
 
         state.write_assistant_chunk("第一段")
+        status_text = "".join(part for _, part in state.status_fragments())
+        self.assertIn("·· ⇣ wait", status_text)
         state.write_assistant_chunk("第二段")
         state.finish_assistant_response()
 
         status_text = "".join(part for _, part in state.status_fragments())
-        self.assertIn("状态: 已就绪", status_text)
-        self.assertIn("阶段: 回复完成", status_text)
-        self.assertIn("上轮耗时:", status_text)
+        self.assertIn("·· ○ idle", status_text)
         self.assertIn("第一段第二段", state.transcript_text)
 
     def test_state_tracks_restore_duration(self):
@@ -186,9 +230,38 @@ class ChatSessionTests(unittest.TestCase):
         state.finish_restore()
 
         status_text = "".join(part for _, part in state.status_fragments())
-        self.assertIn("状态: 已就绪", status_text)
-        self.assertIn("阶段: 恢复完成", status_text)
-        self.assertIn("恢复耗时:", status_text)
+        self.assertIn("·· ○ idle", status_text)
+
+    def test_state_wait_duration_updates_without_chunks(self):
+        state = InteractiveChatState(
+            model="test-model",
+            session_path=Path("/tmp/demo.jsonl"),
+            history_messages=[],
+        )
+
+        state.begin_assistant_response()
+        first_status = "".join(part for _, part in state.status_fragments())
+        time.sleep(0.02)
+        second_status = "".join(part for _, part in state.status_fragments())
+
+        self.assertIn("·· ↻ wait", first_status)
+        self.assertIn("·· ↻ wait", second_status)
+        self.assertNotEqual(first_status, second_status)
+
+    def test_status_fragments_color_status_token_and_keep_time_gray(self):
+        state = InteractiveChatState(
+            model="test-model",
+            session_path=Path("/tmp/demo.jsonl"),
+            history_messages=[],
+        )
+
+        state.begin_restore()
+        fragments = state.status_fragments()
+
+        self.assertEqual(fragments[0], ("class:status.prefix", "·· "))
+        self.assertEqual(fragments[1], ("class:status.load", "↻"))
+        self.assertEqual(fragments[3], ("class:status.load", "load"))
+        self.assertEqual(fragments[-1][0], "class:status.time")
 
     def test_transcript_fragments_separate_role_and_content_styles(self):
         state = InteractiveChatState(

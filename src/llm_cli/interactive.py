@@ -34,6 +34,13 @@ class _TranscriptLexer:
 
 
 class InteractiveChatState:
+    STATUS_TOKENS = {
+        "已就绪": ("○", "idle", "class:status.idle"),
+        "恢复中": ("↻", "load", "class:status.load"),
+        "等待回复": ("↻", "wait", "class:status.wait"),
+        "接收回复": ("⇣", "wait", "class:status.wait"),
+        "出错": ("!", "fail", "class:status.fail"),
+    }
     ROLE_STYLES = {
         "user": ("你  ", "class:role.user", "class:message.user"),
         "assistant": ("AI  ", "class:role.assistant", "class:message.assistant"),
@@ -70,17 +77,15 @@ class InteractiveChatState:
         return fragments
 
     def status_fragments(self):
+        self._refresh_active_elapsed()
+        symbol, label, token_style = self._status_token()
         return [
-            ("class:status.bracket", "["),
-            ("class:status.label", "状态: "),
-            ("class:status.value", self.status),
-            ("class:status.sep", " | "),
-            ("class:status.label", f"{self.metric_label}: "),
-            ("class:status.value", self.metric_value),
-            ("class:status.sep", " | "),
-            ("class:status.label", "阶段: "),
-            ("class:status.value", self.phase),
-            ("class:status.bracket", "]"),
+            ("class:status.prefix", "·· "),
+            (token_style, symbol),
+            ("", " "),
+            (token_style, label),
+            ("", "  "),
+            ("class:status.time", self.metric_value),
         ]
 
     def toolbar_fragments(self):
@@ -107,22 +112,19 @@ class InteractiveChatState:
 
     def begin_restore(self):
         self.status = "恢复中"
-        self.phase = "回放历史"
         self.metric_label = "已耗时"
         self.metric_value = "0.00s"
         self._restore_started_at = perf_counter()
 
     def finish_restore(self):
         self.status = "已就绪"
-        self.phase = "恢复完成"
-        self.metric_label = "恢复耗时"
+        self.phase = "空闲"
         self.metric_value = self._elapsed_since(self._restore_started_at)
         self._restore_started_at = None
 
     def begin_assistant_response(self):
-        self.status = "等待首字"
-        self.phase = "已发出请求"
-        self.metric_label = "本轮耗时"
+        self.status = "等待回复"
+        self.phase = "处理中"
         self.metric_value = "0.00s"
         self._assistant_open = False
         self._assistant_entry = None
@@ -136,8 +138,7 @@ class InteractiveChatState:
             self.transcript_entries.append({"role": "assistant", "text": ""})
             self._assistant_entry = self.transcript_entries[-1]
             self._assistant_open = True
-            self.status = "回复中"
-            self.phase = "流式输出"
+            self.status = "接收回复"
         self._assistant_entry["text"] += chunk
 
     def finish_assistant_response(self):
@@ -145,15 +146,13 @@ class InteractiveChatState:
         self._assistant_open = False
         self._assistant_entry = None
         self.status = "已就绪"
-        self.phase = "回复完成"
-        self.metric_label = "上轮耗时"
+        self.phase = "空闲"
         self._response_started_at = None
 
     def mark_error(self):
         self._refresh_active_elapsed()
         self.status = "出错"
-        self.phase = "请求失败"
-        self.metric_label = "本轮耗时"
+        self.phase = "失败"
         self._assistant_open = False
         self._assistant_entry = None
         self._response_started_at = None
@@ -171,6 +170,9 @@ class InteractiveChatState:
             self.metric_value = self._elapsed_since(self._response_started_at)
         elif self._restore_started_at is not None:
             self.metric_value = self._elapsed_since(self._restore_started_at)
+
+    def _status_token(self):
+        return self.STATUS_TOKENS.get(self.status) or ("○", "idle", "class:status.idle")
 
     @staticmethod
     def _entry_text(entry):
@@ -238,10 +240,12 @@ def _create_application(state, *, on_submit):
     style = Style.from_dict(
         {
             "prompt": "#60a5fa",
-            "status.bracket": "#4b5563",
-            "status.label": "#94a3b8",
-            "status.value": "#e5e7eb",
-            "status.sep": "#475569",
+            "status.prefix": "#475569",
+            "status.time": "#94a3b8",
+            "status.idle": "#94a3b8",
+            "status.load": "#67e8f9",
+            "status.wait": "#22d3ee",
+            "status.fail": "#f87171",
             "toolbar.label": "#64748b",
             "toolbar.value": "#cbd5e1",
             "toolbar.sep": "#334155",
@@ -269,11 +273,10 @@ def run_interactive_chat(
     max_output_tokens,
     history_messages,
 ):
-    state = InteractiveChatState(model=model, session_path=session_path, history_messages=[])
-    state.begin_restore()
-    for message in history_messages:
-        state.append_message(message.get("role"), message.get("content", ""))
-    state.finish_restore()
+    state = InteractiveChatState(model=model, session_path=session_path, history_messages=history_messages)
+    if history_messages:
+        state.begin_restore()
+        state.finish_restore()
     click.echo(f"会话: {session_path} | 已加载 {len(history_messages)} 条消息")
 
     app_ref = {"busy": False}
@@ -284,6 +287,14 @@ def run_interactive_chat(
         if app is not None:
             app.invalidate()
 
+    async def refresh_wait_status(output_area, interval=0.2):
+        try:
+            while app_ref["busy"] and state.status == "等待回复":
+                sync_output(output_area)
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+
     async def process_submission(user_text, output_area):
         state.append_message("user", user_text)
         state.message_count += 1
@@ -292,6 +303,7 @@ def run_interactive_chat(
         assistant_parts = []
         state.begin_assistant_response()
         sync_output(output_area)
+        refresh_task = app_ref["app"].create_background_task(refresh_wait_status(output_area))
 
         def handle_chunk(chunk):
             assistant_parts.append(chunk)
@@ -310,6 +322,7 @@ def run_interactive_chat(
                 stream_handler=handle_chunk,
             )
         except Exception:
+            refresh_task.cancel()
             state.mark_error()
             sync_output(output_area)
             app_ref["busy"] = False
@@ -318,6 +331,7 @@ def run_interactive_chat(
         if not assistant_parts and result["text"]:
             state.write_assistant_chunk(result["text"])
         state.finish_assistant_response()
+        refresh_task.cancel()
         state.message_count += 1
         assistant_text = result["text"]
         append_session_messages(session_path, [{"role": "user", "content": user_text}, {"role": "assistant", "content": assistant_text}])
