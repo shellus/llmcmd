@@ -127,7 +127,7 @@ tasks:
 新增会话参数：
 
 - `-s/--session`：加载并持久化对话历史，值可为会话名或 `.jsonl` 路径
-- `-I/--interactive`：进入交互式连续对话，默认持久化到当前目录下的 `.llm-chat.jsonl`
+- `-I/--interactive`：进入交互式连续对话；默认仅保存在内存中，配合 `-s` 才会加载并持久化
 
 示例：
 
@@ -141,12 +141,13 @@ llm chat -I -s ./sessions/product-review.jsonl
 说明：
 
 - `-s product-review` 会落盘到当前目录下的 `product-review.jsonl`
-- 单次模式和 `-I` 交互模式可共享同一个会话文件，随时切换继续
+- 单次模式和 `-I -s ...` 交互模式可共享同一个会话文件，随时切换继续
 - `llm chat -I "首轮问题"` 会先发送这条首轮消息，再进入连续对话
-- `-I` 模式下会先回放历史消息，响应流式打印到终端，按 `Ctrl+C` 结束
+- `-I` 模式下只有配合 `-s` 才会回放历史消息并持续写回；不带 `-s` 时为纯内存会话
 - `-I` 基于 `Textual` 全屏 TUI 提供消息区、输入区、输入框上方常驻交互状态行和底部元信息栏
 - 历史消息中的 `你 / AI / 系统` 角色标签会独立着色，便于快速分辨轮次边界
 - 当前持久会话先聚焦连续文本对话，不与 `-i/-r/--edit/--system` 组合
+- 交互式内置命令：`/clear` 清空当前会话，`/model <name>` 切换当前模型并写回 `CHAT_MODEL`，`/save <name-or-path>` 将当前会话保存到指定文件
 
 ### `llm image`
 用于图片生成或参考图编辑，支持 `-n/--count` 多图生成。
@@ -170,15 +171,15 @@ llm chat -I -s ./sessions/product-review.jsonl
 ```bash
 API_KEY=your_api_key
 BASE_URL=https://your-api-endpoint/v1
-LLM_MODEL=your_default_model
+MODEL=your_default_model
 ```
 
 如果你希望按能力拆分模型，也可以这样配置：
 
 ```bash
-LLM_TEXT_MODEL=your_chat_model
-LLM_IMAGE_MODEL=your_image_model
-LLM_AUDIO_MODEL=your_audio_model
+CHAT_MODEL=your_chat_model
+IMAGE_MODEL=your_image_model
+AUDIO_MODEL=your_audio_model
 ```
 
 常用并发配置：
@@ -191,9 +192,9 @@ OPENAI_IMAGE_CONCURRENCY=4
 
 模型优先级：
 
-- `chat`：`LLM_TEXT_MODEL` → `LLM_MODEL` → `OPENAI_CHAT_MODEL` → `OPENAI_MODEL`
-- `image`：`LLM_IMAGE_MODEL` → `LLM_MODEL` → `OPENAI_IMAGE_MODEL`
-- `audio`：`LLM_AUDIO_MODEL` → `LLM_MODEL` → `GEMINI_AUDIO_MODEL`
+- `chat`：`CHAT_MODEL` → `MODEL`
+- `image`：`IMAGE_MODEL` → `MODEL`
+- `audio`：`AUDIO_MODEL` → `MODEL`
 
 ## 包信息
 
@@ -207,7 +208,7 @@ OPENAI_IMAGE_CONCURRENCY=4
 - [x] `chat --edit` 文本编辑工作流
 - [x] `image -n` 多图生成
 - [x] `chat -s/-I` JSONL 持久会话与交互式流式对话
-- [ ] 会话内建管理命令，如历史查看、清理、重命名
+- [x] 会话内建管理命令：`/clear`、`/model`、`/save`
 - [ ] 持久会话扩展到多模态连续编辑场景
 
 ## 详细文档

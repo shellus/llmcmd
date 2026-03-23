@@ -46,11 +46,12 @@ llm chat "按要求改写" --edit 商务女性生图.md -o 商务女性生图.v2
 - `-i/--input` 可重复传入多个文本文件，作为补充上下文
 - `-r/--reference` 可重复传入多张图片，用于视觉理解或图片分析
 - `-s/--session` 用于加载并持久化 JSONL 对话历史，可传会话名或文件路径
-- `-I/--interactive` 进入交互式连续对话，默认持久化到当前目录 `.llm-chat.jsonl`
+- `-I/--interactive` 进入交互式连续对话；默认仅保存在内存中，配合 `-s` 才会加载并持久化
 - `llm chat -I "首轮问题"` 会先发送这条首轮消息，再进入连续对话
-- 单次 `chat` 与 `-I` 交互模式可以共享同一个会话文件并来回切换
-- `-I` 模式下会先回放历史消息，响应流式输出到终端，按 `Ctrl+C` 结束
+- 单次 `chat` 与 `-I -s ...` 交互模式可以共享同一个会话文件并来回切换
+- `-I` 模式下只有配合 `-s` 才会回放历史消息并持续写回；不带 `-s` 时为纯内存会话
 - `-I` 基于 `prompt_toolkit Application` 提供消息区、输入区和常驻状态栏
+- 交互式内置命令：`/clear` 清空当前会话，`/model <name>` 切换当前模型并写回 `CHAT_MODEL`，`/save <name-or-path>` 将当前会话保存到指定文件
 - `--edit` 用于编辑目标文本文件
 - `--edit` 模式下，模型必须输出 `SEARCH/REPLACE` diff blocks，CLI 自动应用 diff
 - `--edit` 不带 `-o` 时直接覆盖原文件；带 `-o` 时输出到新文件
@@ -182,24 +183,24 @@ tasks:
 ```bash
 API_KEY=your_api_key
 BASE_URL=https://your-api-endpoint/v1
-LLM_MODEL=your_default_model
+MODEL=your_default_model
 ```
 
 按模式拆分模型时可使用：
 
 ```bash
-LLM_TEXT_MODEL=your_chat_model
-LLM_IMAGE_MODEL=your_image_model
-LLM_AUDIO_MODEL=your_audio_model
+CHAT_MODEL=your_chat_model
+IMAGE_MODEL=your_image_model
+AUDIO_MODEL=your_audio_model
 ```
 
 模型优先级：
 
 | 模式 | 优先级 |
 |------|--------|
-| chat | `LLM_TEXT_MODEL` → `LLM_MODEL` → `OPENAI_CHAT_MODEL` → `OPENAI_MODEL` |
-| image | `LLM_IMAGE_MODEL` → `LLM_MODEL` → `OPENAI_IMAGE_MODEL` |
-| audio | `LLM_AUDIO_MODEL` → `LLM_MODEL` → `GEMINI_AUDIO_MODEL` |
+| chat | `CHAT_MODEL` → `MODEL` |
+| image | `IMAGE_MODEL` → `MODEL` |
+| audio | `AUDIO_MODEL` → `MODEL` |
 
 并发优先级：
 

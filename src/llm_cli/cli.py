@@ -154,7 +154,7 @@ def cli():
 @click.option("--edit", "edit_path", default=None, help="编辑目标文本文件；模型将输出 diff 并自动应用")
 @click.option("-s", "--session", "session_name", default=None, help="加载/持久化对话历史；可传会话名或 JSONL 路径")
 @click.option("--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
-@click.option("-I", "--interactive", is_flag=True, help="进入交互式连续对话，并默认持久化到当前路径")
+@click.option("-I", "--interactive", is_flag=True, help="进入交互式连续对话；仅在配合 -s 时持久化")
 @click.option("-o", "--output", default=None, help="输出路径；edit 模式下不传则直接覆盖原文件")
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
@@ -173,7 +173,7 @@ def chat(prompt, input_files, reference, edit_path, session_name, system, intera
     if interactive and output:
         fail("交互式对话不支持 --output")
     client, resolved_model, _ = create_client("chat", explicit_model=model)
-    session_path = resolve_session_path(session_name, interactive=interactive) if (interactive or session_name is not None) else None
+    session_path = resolve_session_path(session_name, interactive=interactive) if session_name is not None else None
     if interactive:
         run_interactive_chat(
             client=client,
@@ -182,7 +182,7 @@ def chat(prompt, input_files, reference, edit_path, session_name, system, intera
             session_path=session_path,
             temperature=temperature,
             max_output_tokens=max_output_tokens,
-            history_messages=load_session_messages(session_path),
+            history_messages=load_session_messages(session_path) if session_path else [],
             probe_input=probe_input,
         )
         return

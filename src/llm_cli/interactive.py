@@ -6,11 +6,14 @@ from time import perf_counter
 import click
 from rich.text import Text
 
+from .config import load_env_file, write_env_value
 from .session import append_session_messages
 from .task import run_task
 
 
 def _session_display_name(session_path):
+    if not session_path:
+        return "未持久化"
     path = Path(session_path)
     return path.stem if path.suffix == ".jsonl" else path.name
 
@@ -44,7 +47,7 @@ class InteractiveChatState:
 
     def __init__(self, *, model, session_path, history_messages):
         self.model = model
-        self.session_path = Path(session_path)
+        self.session_path = Path(session_path) if session_path else None
         self.message_count = len(history_messages)
         self.status = "已就绪"
         self.phase = "空闲"
@@ -230,6 +233,27 @@ class InteractiveChatState:
     def record_debug_event(self, name):
         self.debug_event = name
 
+    def clear_messages(self):
+        self.message_count = 0
+        self.transcript_entries = []
+        self.user_inputs = []
+        self.reset_input_replay()
+        self.status = "已就绪"
+        self.phase = "空闲"
+        self.metric_label = "上轮耗时"
+        self.metric_value = "-"
+        self._assistant_open = False
+        self._assistant_entry = None
+        self._response_started_at = None
+        self._response_started_iso = None
+        self._restore_started_at = None
+
+    def set_session_path(self, session_path):
+        self.session_path = Path(session_path) if session_path else None
+
+    def set_model(self, model):
+        self.model = model
+
     def _refresh_active_elapsed(self):
         if self._response_started_at is not None:
             self.metric_value = self._elapsed_since(self._response_started_at)
@@ -411,6 +435,12 @@ def _create_textual_app(
             if not text or self._busy:
                 self.input_widget.value = ""
                 return
+            command_result = self._run_builtin_command(text)
+            if command_result:
+                self.input_widget.value = ""
+                self._reload_transcript()
+                self._refresh_status()
+                return
             self.input_widget.value = ""
             self._busy = True
             state.append_message("user", text)
@@ -434,7 +464,7 @@ def _create_textual_app(
                 run_task,
                 "chat",
                 client,
-                model,
+                state.model,
                 messages=_request_messages([*history_messages, {"role": "user", "content": user_text}]),
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
@@ -442,18 +472,74 @@ def _create_textual_app(
             )
             except Exception as exc:
                 state.mark_error()
+                finalize_failed_round(
+                    state=state,
+                    history_messages=history_messages,
+                    user_text=user_text,
+                    error_text=str(exc),
+                )
                 self._on_round_failed(str(exc))
                 return
 
             if not assistant_parts and result["text"]:
                 state.write_assistant_chunk(result["text"])
-            user_message = state.current_round_user_message(user_text)
             state.finish_assistant_response()
             state.message_count += 1
-            assistant_message = state.current_round_assistant_message()
-            append_session_messages(session_path, [user_message, assistant_message])
-            history_messages.extend([user_message, assistant_message])
+            finalize_successful_round(
+                state=state,
+                history_messages=history_messages,
+                user_text=user_text,
+            )
             self._on_round_complete()
+
+        def _run_builtin_command(self, text: str) -> bool:
+            command, argument = parse_builtin_command(text)
+            if not command:
+                return False
+
+            try:
+                if command == "clear":
+                    self._handle_clear_command()
+                elif command == "model":
+                    self._handle_model_command(argument)
+                elif command == "save":
+                    self._handle_save_command(argument)
+                else:
+                    return False
+            except click.ClickException as exc:
+                state.append_message("system", str(exc))
+            return True
+
+        def _handle_clear_command(self) -> None:
+            history_messages.clear()
+            if state.session_path:
+                state.session_path.parent.mkdir(parents=True, exist_ok=True)
+                state.session_path.write_text("", encoding="utf-8")
+            state.clear_messages()
+            state.append_message("system", "已清空当前会话")
+
+        def _handle_model_command(self, argument: str) -> None:
+            if not argument:
+                state.append_message("system", f"当前模型: {state.model}")
+                return
+            env_path, _ = load_env_file()
+            write_env_value(env_path, "CHAT_MODEL", argument)
+            state.set_model(argument)
+            state.append_message("system", f"已切换模型并写回 CHAT_MODEL={argument}")
+
+        def _handle_save_command(self, argument: str) -> None:
+            if not argument:
+                raise click.ClickException("/save 需要指定会话名或 JSONL 路径")
+            target_path = _resolve_command_session_path(argument)
+            previous_path = state.session_path
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text("", encoding="utf-8")
+            if history_messages:
+                append_session_messages(target_path, history_messages)
+            if previous_path and previous_path != target_path and previous_path.exists():
+                previous_path.unlink()
+            state.set_session_path(target_path)
+            state.append_message("system", f"已保存会话到 {target_path}")
 
         def _on_transcript_update(self) -> None:
             self._reload_transcript()
@@ -541,3 +627,47 @@ def run_interactive_chat(
         probe_input=probe_input,
     )
     app.run()
+
+
+def parse_builtin_command(text):
+    stripped = text.strip()
+    if not stripped.startswith("/"):
+        return None, None
+    body = stripped[1:].strip()
+    if not body:
+        return None, None
+    parts = body.split(maxsplit=1)
+    command = parts[0].lower()
+    argument = parts[1].strip() if len(parts) > 1 else ""
+    return command, argument
+
+
+def _resolve_command_session_path(session_value):
+    session_path = Path(session_value).expanduser()
+    has_path_hint = session_path.is_absolute() or any(part in {".", ".."} for part in session_path.parts) or session_path.parent != Path(".")
+    if not has_path_hint and session_path.suffix == "":
+        session_path = Path(f"{session_value}.jsonl")
+    if not session_path.is_absolute():
+        session_path = Path.cwd() / session_path
+    return session_path.resolve()
+
+
+def finalize_failed_round(*, state, history_messages, user_text, error_text):
+    round_messages = [state.current_round_user_message(user_text)]
+    assistant_message = state.current_round_assistant_message()
+    if assistant_message.get("content"):
+        round_messages.append(assistant_message)
+    round_messages.append({"role": "system", "content": error_text})
+    history_messages.extend(round_messages)
+    if state.session_path:
+        append_session_messages(state.session_path, round_messages)
+
+
+def finalize_successful_round(*, state, history_messages, user_text):
+    round_messages = [
+        state.current_round_user_message(user_text),
+        state.current_round_assistant_message(),
+    ]
+    history_messages.extend(round_messages)
+    if state.session_path:
+        append_session_messages(state.session_path, round_messages)

@@ -10,9 +10,7 @@ def _now_iso():
 def resolve_session_path(session_value=None, *, cwd=None, interactive=False):
     base_dir = Path(cwd or Path.cwd()).resolve()
     if not session_value:
-        if not interactive:
-            return None
-        return (base_dir / ".llm-chat.jsonl").resolve()
+        return None
 
     session_path = Path(session_value).expanduser()
     has_path_hint = session_path.is_absolute() or any(part in {".", ".."} for part in session_path.parts) or session_path.parent != Path(".")
@@ -67,3 +65,15 @@ def append_session_messages(session_path, messages):
             if isinstance(meta, dict) and meta:
                 record["meta"] = meta
             handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
+def rewrite_session_messages(session_path, messages):
+    path = Path(session_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
+    if messages:
+        append_session_messages(path, messages)
+
+
+def clear_session_file(session_path):
+    rewrite_session_messages(session_path, [])

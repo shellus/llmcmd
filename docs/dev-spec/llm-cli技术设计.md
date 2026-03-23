@@ -78,15 +78,25 @@ session.py 读取 JSONL
 |------|------|
 | `API_KEY` | 上游鉴权 |
 | `BASE_URL` | OpenAI 兼容接口地址 |
-| `LLM_MODEL` | 通用默认模型 |
-| `LLM_TEXT_MODEL` | 文本模式优先模型 |
-| `LLM_IMAGE_MODEL` | 图片模式优先模型 |
-| `LLM_AUDIO_MODEL` | 音频模式优先模型 |
+| `MODEL` | 通用默认模型 |
+| `CHAT_MODEL` | 文本模式优先模型 |
+| `IMAGE_MODEL` | 图片模式优先模型 |
+| `AUDIO_MODEL` | 音频模式优先模型 |
 | `LLM_CONCURRENCY` | 全局并发上限 |
 | `OPENAI_CHAT_CONCURRENCY` | 旧版文本并发兼容变量 |
 | `OPENAI_IMAGE_CONCURRENCY` | 旧版图片并发兼容变量 |
 
-模型解析优先级在 `config.py` 中按 mode 分开处理。维护时不要把所有模式强行合并到一条链，否则会破坏已有兼容行为。
+模型解析优先级在 `config.py` 中按 mode 分开处理：
+
+- `chat`：`CHAT_MODEL` → `MODEL`
+- `image`：`IMAGE_MODEL` → `MODEL`
+- `audio`：`AUDIO_MODEL` → `MODEL`
+
+交互式内置命令约束：
+
+- `/clear` 清空当前会话；若当前已绑定持久化会话文件，则同步清空文件内容
+- `/model <name>` 切换当前交互模型，并写回 `~/.config/llm-api/.env` 中的 `CHAT_MODEL`
+- `/save <name-or-path>` 将当前会话整体保存到指定文件；若当前已持久化且目标不同，则切换到新文件继续写入
 
 ## 消息构造约束
 

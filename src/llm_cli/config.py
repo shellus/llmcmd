@@ -31,10 +31,10 @@ def resolve_model(mode, config, explicit_model=None):
         return explicit_model
 
     chains = {
-        "chat": ["LLM_TEXT_MODEL", "LLM_MODEL", "OPENAI_CHAT_MODEL", "OPENAI_MODEL"],
-        "text": ["LLM_TEXT_MODEL", "LLM_MODEL", "OPENAI_CHAT_MODEL", "OPENAI_MODEL"],
-        "image": ["LLM_IMAGE_MODEL", "LLM_MODEL", "OPENAI_IMAGE_MODEL"],
-        "audio": ["LLM_AUDIO_MODEL", "LLM_MODEL", "GEMINI_AUDIO_MODEL"],
+        "chat": ["CHAT_MODEL", "MODEL"],
+        "text": ["CHAT_MODEL", "MODEL"],
+        "image": ["IMAGE_MODEL", "MODEL"],
+        "audio": ["AUDIO_MODEL", "MODEL"],
     }
 
     for name in chains[mode]:
@@ -86,3 +86,30 @@ def create_client(mode, explicit_model=None):
     api_key, base_url, model, config = load_config(mode, explicit_model=explicit_model)
     client = OpenAI(api_key=api_key, base_url=base_url)
     return client, model, config
+
+
+def write_env_value(config_file, key, value):
+    path = Path(config_file).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+    else:
+        lines = []
+
+    output_lines = []
+    replaced = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in line:
+            current_key, _ = line.split("=", 1)
+            if current_key.strip() == key:
+                output_lines.append(f"{key}={value}")
+                replaced = True
+                continue
+        output_lines.append(line)
+
+    if not replaced:
+        output_lines.append(f"{key}={value}")
+
+    path.write_text("\n".join(output_lines) + "\n", encoding="utf-8")

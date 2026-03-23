@@ -127,7 +127,7 @@ class ChatSessionTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 0)
             self.assertTrue(captured["probe_input"])
 
-    def test_interactive_defaults_to_hidden_session_file_in_cwd(self):
+    def test_interactive_with_explicit_session_uses_given_session_path(self):
         with TemporaryDirectory() as tmp:
             captured = {}
 
@@ -144,12 +144,31 @@ class ChatSessionTests(unittest.TestCase):
                 with patch("llm_cli.cli.create_client", fake_create_client), patch(
                     "llm_cli.cli.run_interactive_chat", fake_run_interactive_chat
                 ):
-                    result = runner.invoke(cli, ["chat", "-I"])
+                    result = runner.invoke(cli, ["chat", "-I", "-s", ".llm-chat.jsonl"])
             finally:
                 os.chdir(old_cwd)
 
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(captured["session_path"], (Path(tmp) / ".llm-chat.jsonl").resolve())
+
+    def test_interactive_without_session_does_not_create_default_session_path(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-model", {}
+
+        def fake_run_interactive_chat(**kwargs):
+            captured.update(kwargs)
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch(
+            "llm_cli.cli.run_interactive_chat", fake_run_interactive_chat
+        ):
+            result = runner.invoke(cli, ["chat", "-I"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIsNone(captured["session_path"])
+        self.assertEqual(captured["history_messages"], [])
 
     def test_state_replays_history_and_updates_toolbar(self):
         state = InteractiveChatState(
@@ -177,6 +196,16 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(status_text, "·· ○ idle")
         separator = state.transcript_lines()[2][0][1]
         self.assertEqual(separator, "──── 14:32 · 6.83s")
+
+    def test_state_toolbar_marks_non_persistent_session(self):
+        state = InteractiveChatState(
+            model="test-model",
+            session_path=None,
+            history_messages=[],
+        )
+
+        toolbar_text = "".join(part for _, part in state.toolbar_fragments())
+        self.assertIn("会话: 未持久化", toolbar_text)
 
     def test_load_session_messages_preserves_meta_for_history_separator(self):
         from llm_cli.session import load_session_messages
@@ -368,6 +397,153 @@ class ChatSessionTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             resolved = resolve_session_path("./sessions/demo.jsonl", cwd=tmp)
             self.assertEqual(resolved, (Path(tmp) / "sessions" / "demo.jsonl").resolve())
+
+    def test_interactive_without_session_path_resolves_to_none(self):
+        from llm_cli.session import resolve_session_path
+
+        with TemporaryDirectory() as tmp:
+            resolved = resolve_session_path(None, cwd=tmp, interactive=True)
+            self.assertIsNone(resolved)
+
+    def test_resolve_model_uses_new_two_level_model_chain(self):
+        from llm_cli.config import resolve_model
+
+        config = {
+            "MODEL": "global-model",
+            "CHAT_MODEL": "chat-model",
+            "IMAGE_MODEL": "image-model",
+            "AUDIO_MODEL": "audio-model",
+        }
+
+        self.assertEqual(resolve_model("chat", config), "chat-model")
+        self.assertEqual(resolve_model("text", config), "chat-model")
+        self.assertEqual(resolve_model("image", config), "image-model")
+        self.assertEqual(resolve_model("audio", config), "audio-model")
+
+    def test_resolve_model_falls_back_to_global_model(self):
+        from llm_cli.config import resolve_model
+
+        config = {"MODEL": "global-model"}
+
+        self.assertEqual(resolve_model("chat", config), "global-model")
+        self.assertEqual(resolve_model("image", config), "global-model")
+        self.assertEqual(resolve_model("audio", config), "global-model")
+
+    def test_write_env_value_updates_existing_key_and_preserves_others(self):
+        from llm_cli.config import write_env_value
+
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text("API_KEY=demo\nCHAT_MODEL=old-chat\nMODEL=global\n", encoding="utf-8")
+
+            write_env_value(env_path, "CHAT_MODEL", "new-chat")
+
+            self.assertEqual(
+                env_path.read_text(encoding="utf-8"),
+                "API_KEY=demo\nCHAT_MODEL=new-chat\nMODEL=global\n",
+            )
+
+    def test_write_env_value_appends_missing_key(self):
+        from llm_cli.config import write_env_value
+
+        with TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text("API_KEY=demo\n", encoding="utf-8")
+
+            write_env_value(env_path, "CHAT_MODEL", "new-chat")
+
+            self.assertEqual(
+                env_path.read_text(encoding="utf-8"),
+                "API_KEY=demo\nCHAT_MODEL=new-chat\n",
+            )
+
+    def test_parse_builtin_command_supports_clear_model_and_save(self):
+        from llm_cli.interactive import parse_builtin_command
+
+        self.assertEqual(parse_builtin_command("/clear"), ("clear", ""))
+        self.assertEqual(parse_builtin_command("/model gpt-5"), ("model", "gpt-5"))
+        self.assertEqual(parse_builtin_command("/save worklog"), ("save", "worklog"))
+        self.assertEqual(parse_builtin_command("普通消息"), (None, None))
+
+    def test_finalize_failed_round_persists_partial_assistant_and_error(self):
+        from llm_cli.interactive import InteractiveChatState, finalize_failed_round
+
+        with TemporaryDirectory() as tmp:
+            session_path = Path(tmp) / "failed.jsonl"
+            history_messages = []
+            state = InteractiveChatState(
+                model="test-model",
+                session_path=session_path,
+                history_messages=[],
+            )
+
+            state.append_message("user", "新问题")
+            state.message_count += 1
+            state.begin_assistant_response()
+            state.write_assistant_chunk("已输出一半")
+            state.mark_error()
+
+            finalize_failed_round(
+                state=state,
+                history_messages=history_messages,
+                user_text="新问题",
+                error_text="网络中断",
+            )
+
+            self.assertEqual(
+                history_messages,
+                [
+                    {"role": "user", "content": "新问题", "meta": {"started_at": None}},
+                    {"role": "assistant", "content": "已输出一半", "meta": {}},
+                    {"role": "system", "content": "网络中断"},
+                ],
+            )
+            lines = session_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), 3)
+            self.assertIn('"role":"assistant"', lines[1])
+            self.assertIn("已输出一半", lines[1])
+            self.assertIn('"role":"system"', lines[2])
+            self.assertIn("网络中断", lines[2])
+
+    def test_finalize_successful_round_persists_user_and_assistant(self):
+        from llm_cli.interactive import InteractiveChatState, finalize_successful_round
+
+        with TemporaryDirectory() as tmp:
+            session_path = Path(tmp) / "success.jsonl"
+            history_messages = []
+            state = InteractiveChatState(
+                model="test-model",
+                session_path=session_path,
+                history_messages=[],
+            )
+
+            state.append_message("user", "输出出师表全文")
+            state.message_count += 1
+            state.begin_assistant_response()
+            state.write_assistant_chunk("先帝创业未半")
+            state.finish_assistant_response()
+
+            finalize_successful_round(
+                state=state,
+                history_messages=history_messages,
+                user_text="输出出师表全文",
+            )
+
+            self.assertEqual(
+                history_messages,
+                [
+                    {"role": "user", "content": "输出出师表全文", "meta": {"started_at": None}},
+                    {
+                        "role": "assistant",
+                        "content": "先帝创业未半",
+                        "meta": state.transcript_entries[-1]["meta"],
+                    },
+                ],
+            )
+            lines = session_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertIn('"role":"user"', lines[0])
+            self.assertIn('"role":"assistant"', lines[1])
 
     def test_build_messages_keeps_multiple_reference_images_for_image_mode(self):
         from llm_cli.messages import build_messages
