@@ -170,6 +170,80 @@ class ChatSessionTests(unittest.TestCase):
         self.assertIsNone(captured["session_path"])
         self.assertEqual(captured["history_messages"], [])
 
+    def test_interactive_chat_passes_system_prompt_into_runner(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-model", {}
+
+        def fake_run_interactive_chat(**kwargs):
+            captured.update(kwargs)
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch(
+            "llm_cli.cli.run_interactive_chat", fake_run_interactive_chat
+        ):
+            result = runner.invoke(cli, ["chat", "-I", "--system", "系统设定"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["system_prompt"], "系统设定")
+
+    def test_single_chat_with_session_replaces_leading_system_messages(self):
+        with TemporaryDirectory() as tmp:
+            session_path = Path(tmp) / "demo.jsonl"
+            session_path.write_text(
+                '{"type":"message","role":"system","content":"旧系统"}\n'
+                '{"type":"message","role":"user","content":"旧问题"}\n'
+                '{"type":"message","role":"assistant","content":"旧回答"}\n',
+                encoding="utf-8",
+            )
+
+            captured = {}
+
+            def fake_create_client(mode, explicit_model=None):
+                return object(), "test-model", {}
+
+            def fake_run_task(mode, client, model, **kwargs):
+                captured["messages"] = kwargs["messages"]
+                return {"mode": mode, "text": "新回答", "printed": True}
+
+            runner = CliRunner()
+            with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+                result = runner.invoke(cli, ["chat", "新问题", "-s", str(session_path), "--system", "新系统"])
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertEqual(
+                captured["messages"],
+                [
+                    {"role": "system", "content": "新系统"},
+                    {"role": "user", "content": "旧问题"},
+                    {"role": "assistant", "content": "旧回答"},
+                    {"role": "user", "content": "新问题"},
+                ],
+            )
+            lines = session_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertIn('"role":"system"', lines[0])
+            self.assertIn("新系统", lines[0])
+
+    def test_single_chat_with_new_session_writes_system_message_first(self):
+        with TemporaryDirectory() as tmp:
+            session_path = Path(tmp) / "demo.jsonl"
+
+            def fake_create_client(mode, explicit_model=None):
+                return object(), "test-model", {}
+
+            def fake_run_task(mode, client, model, **kwargs):
+                return {"mode": mode, "text": "回答", "printed": True}
+
+            runner = CliRunner()
+            with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+                result = runner.invoke(cli, ["chat", "新问题", "-s", str(session_path), "--system", "系统设定"])
+
+            self.assertEqual(result.exit_code, 0)
+            lines = session_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertIn('"role":"system"', lines[0])
+            self.assertIn("系统设定", lines[0])
+
     def test_state_replays_history_and_updates_toolbar(self):
         state = InteractiveChatState(
             model="test-model",

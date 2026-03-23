@@ -52,11 +52,13 @@ llm chat "按要求改写" --edit 商务女性生图.md -o 商务女性生图.v2
 - `-I` 模式下只有配合 `-s` 才会回放历史消息并持续写回；不带 `-s` 时为纯内存会话
 - `-I` 基于 `prompt_toolkit Application` 提供消息区、输入区和常驻状态栏
 - 交互式内置命令：`/clear` 清空当前会话，`/model <name>` 切换当前模型并写回 `CHAT_MODEL`，`/save <name-or-path>` 将当前会话保存到指定文件
+- 如需使用终端原生鼠标拖选复制历史消息，请按住终端模拟器的修饰键；当前环境实测为按住 `Shift` 再拖选
 - `--edit` 用于编辑目标文本文件
 - `--edit` 模式下，模型必须输出 `SEARCH/REPLACE` diff blocks，CLI 自动应用 diff
 - `--edit` 不带 `-o` 时直接覆盖原文件；带 `-o` 时输出到新文件
 - 非 edit 模式下，有 `-o` 时写入文件；无 `-o` 时输出到终端
-- 当前持久会话模式先专注文本连续对话，不与 `-i/-r/--edit/--system` 组合
+- 当前持久会话模式先专注文本连续对话，不与 `-i/-r/--edit` 组合
+- `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只会覆盖会话开头连续的 system 消息，其余历史保留
 
 ## image
 

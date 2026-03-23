@@ -7,8 +7,9 @@ import click
 from rich.text import Text
 
 from .config import load_env_file, write_env_value
-from .session import append_session_messages
+from .session import append_session_messages, replace_leading_system_messages, rewrite_session_messages
 from .task import run_task
+from .utils import resolve_text
 
 
 def _session_display_name(session_path):
@@ -321,6 +322,7 @@ def _create_textual_app(
     model,
     prompt,
     session_path,
+    system_prompt,
     temperature,
     max_output_tokens,
     history_messages,
@@ -606,13 +608,18 @@ def run_interactive_chat(
     model,
     prompt,
     session_path,
+    system_prompt,
     temperature,
     max_output_tokens,
     history_messages,
     probe_input=False,
 ):
-    state = InteractiveChatState(model=model, session_path=session_path, history_messages=history_messages)
-    if history_messages:
+    resolved_system_prompt = resolve_text(system_prompt) if system_prompt else None
+    effective_history = replace_leading_system_messages(history_messages, resolved_system_prompt)
+    if session_path and effective_history != history_messages:
+        rewrite_session_messages(session_path, effective_history)
+    state = InteractiveChatState(model=model, session_path=session_path, history_messages=effective_history)
+    if effective_history:
         state.begin_restore()
         state.finish_restore()
     app = _create_textual_app(
@@ -621,9 +628,10 @@ def run_interactive_chat(
         model=model,
         prompt=prompt,
         session_path=session_path,
+        system_prompt=resolved_system_prompt,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
-        history_messages=history_messages,
+        history_messages=effective_history,
         probe_input=probe_input,
     )
     app.run()

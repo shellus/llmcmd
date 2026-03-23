@@ -8,7 +8,7 @@ from .batch import run_batch
 from .config import create_client
 from .interactive import run_interactive_chat
 from .messages import DEFAULT_AUDIO_PROMPT
-from .session import append_session_messages, load_session_messages, resolve_session_path
+from .session import append_session_messages, load_session_messages, replace_leading_system_messages, resolve_session_path, rewrite_session_messages
 from .task import run_task
 from .utils import fail, resolve_text
 
@@ -71,7 +71,7 @@ def _run_chat_once(
     session_path=None,
 ):
     history_messages = load_session_messages(session_path) if session_path else []
-    if history_messages and (system or input_files or reference or edit_path):
+    if history_messages and (input_files or reference or edit_path):
         fail("持久会话模式暂不支持与 --system/-i/-r/--edit 组合使用")
 
     task_kwargs = {
@@ -92,8 +92,9 @@ def _run_chat_once(
             fail("持久会话模式暂不支持 -r/--reference")
         if input_files:
             fail("持久会话模式暂不支持 -i/--input")
+        history_messages = replace_leading_system_messages(history_messages, resolve_text(system) if system else None)
         if system:
-            fail("持久会话模式暂不支持 --system")
+            rewrite_session_messages(session_path, history_messages)
         prompt_text = resolve_text(prompt)
         if not prompt_text:
             fail("持久会话模式至少需要 prompt")
@@ -183,6 +184,7 @@ def chat(prompt, input_files, reference, edit_path, session_name, system, intera
             temperature=temperature,
             max_output_tokens=max_output_tokens,
             history_messages=load_session_messages(session_path) if session_path else [],
+            system_prompt=system,
             probe_input=probe_input,
         )
         return

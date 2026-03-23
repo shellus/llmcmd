@@ -77,3 +77,12 @@ def rewrite_session_messages(session_path, messages):
 
 def clear_session_file(session_path):
     rewrite_session_messages(session_path, [])
+
+
+def replace_leading_system_messages(messages, system_prompt):
+    remaining = list(messages or [])
+    while remaining and remaining[0].get("role") == "system":
+        remaining.pop(0)
+    if system_prompt:
+        return [{"role": "system", "content": system_prompt}, *remaining]
+    return remaining

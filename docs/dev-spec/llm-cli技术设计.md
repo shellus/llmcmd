@@ -51,7 +51,7 @@ chat --edit
 
 ### `chat -s/-I`
 
-会话模式仅支持纯文本对话，不与 `-i/-r/--edit/--system` 混用。
+会话模式仅支持纯文本对话，不与 `-i/-r/--edit` 混用；`--system` 可以参与会话历史管理。
 
 ```text
 session.py 读取 JSONL
@@ -59,6 +59,8 @@ session.py 读取 JSONL
   -> run_task(messages=[...])
   -> 结果追加写回 JSONL
 ```
+
+当用户在 `chat -s ...` 或 `chat -I -s ...` 中提供 `--system` 时，CLI 会先替换会话开头连续的 `system` 消息，再保留后续 `user / assistant / system(运行期提示)` 历史，并将更新后的结果写回 JSONL。
 
 ### `batch`
 
