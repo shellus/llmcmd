@@ -539,6 +539,21 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(parse_builtin_command("/save worklog"), ("save", "worklog"))
         self.assertEqual(parse_builtin_command("普通消息"), (None, None))
 
+    def test_normalize_composer_text_preserves_internal_newlines(self):
+        from llm_cli.interactive import normalize_composer_text
+
+        self.assertEqual(normalize_composer_text("第一行\n第二行\n"), "第一行\n第二行")
+        self.assertEqual(normalize_composer_text("\n  第一行\n第二行  \n"), "第一行\n第二行")
+        self.assertIsNone(normalize_composer_text(" \n\t "))
+
+    def test_calculate_composer_widget_height_includes_border_space(self):
+        from llm_cli.interactive import calculate_composer_widget_height
+
+        self.assertEqual(calculate_composer_widget_height(0), 3)
+        self.assertEqual(calculate_composer_widget_height(1), 3)
+        self.assertEqual(calculate_composer_widget_height(7), 9)
+        self.assertEqual(calculate_composer_widget_height(20), 17)
+
     def test_finalize_failed_round_persists_partial_assistant_and_error(self):
         from llm_cli.interactive import InteractiveChatState, finalize_failed_round
 

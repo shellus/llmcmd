@@ -23,6 +23,21 @@ def _request_messages(messages):
     return [{"role": message["role"], "content": message.get("content", "")} for message in messages]
 
 
+def normalize_composer_text(text):
+    normalized = str(text).strip()
+    if not normalized:
+        return None
+    return normalized
+
+
+def clamp_composer_height(line_count, *, minimum=1, maximum=15):
+    return max(minimum, min(maximum, int(line_count)))
+
+
+def calculate_composer_widget_height(line_count, *, minimum=1, maximum=15, border_rows=2):
+    return clamp_composer_height(line_count, minimum=minimum, maximum=maximum) + border_rows
+
+
 class InteractiveChatState:
     STATUS_TOKENS = {
         "已就绪": ("○", "idle", "class:status.idle"),
@@ -332,7 +347,7 @@ def _create_textual_app(
         from textual.app import App, ComposeResult
         from textual.binding import Binding
         from textual.containers import Vertical
-        from textual.widgets import Footer, Input, RichLog, Static
+        from textual.widgets import Footer, RichLog, Static, TextArea
     except ImportError as exc:
         raise click.ClickException("交互式对话需要安装 textual") from exc
 
@@ -353,7 +368,7 @@ def _create_textual_app(
         #input {
             height: 3;
             min-height: 3;
-            max-height: 3;
+            max-height: 17;
             margin: 0 1;
             padding: 0 1;
             border: round rgb(71,85,105);
@@ -374,6 +389,9 @@ def _create_textual_app(
         """
 
         BINDINGS = [
+            Binding("enter", "submit_message", show=False, priority=True),
+            Binding("shift+enter", "insert_newline", show=False, priority=True),
+            Binding("ctrl+j", "insert_newline", show=False, priority=True),
             Binding("up", "history_prev", show=False, priority=True),
             Binding("down", "history_next", show=False, priority=True),
             Binding("pageup", "history_page_up", show=False, priority=True),
@@ -386,14 +404,14 @@ def _create_textual_app(
             with Vertical():
                 yield RichLog(id="transcript", wrap=True, markup=False, highlight=False, auto_scroll=False)
                 yield Static(id="status")
-                yield Input(placeholder="", id="input")
+                yield TextArea("", id="input", show_line_numbers=False, soft_wrap=True)
                 yield Static(id="toolbar")
                 yield Footer()
 
         def on_mount(self) -> None:
             self.transcript = self.query_one("#transcript", RichLog)
             self.status_widget = self.query_one("#status", Static)
-            self.input_widget = self.query_one("#input", Input)
+            self.input_widget = self.query_one("#input", TextArea)
             self.toolbar_widget = self.query_one("#toolbar", Static)
             self.transcript.can_focus = False
             self.transcript.focus_on_click = False
@@ -401,6 +419,7 @@ def _create_textual_app(
             self._transcript_at_bottom = True
             self._refresh_status()
             self._reload_transcript()
+            self._refresh_input_height()
             self.set_interval(0.2, self._tick_status)
             self.call_after_refresh(self._scroll_to_end)
             self.call_after_refresh(self.input_widget.focus)
@@ -426,24 +445,39 @@ def _create_textual_app(
             if self._busy:
                 self._refresh_status()
 
+        def _refresh_input_height(self) -> None:
+            line_count = getattr(self.input_widget.wrapped_document, "height", 1)
+            self.input_widget.styles.height = calculate_composer_widget_height(line_count)
+
         def _mark_user_scrolling(self) -> None:
             self._transcript_at_bottom = False
 
-        async def on_input_submitted(self, message: Input.Submitted) -> None:
-            await self._submit_text(message.value)
+        def on_text_area_changed(self, message: TextArea.Changed) -> None:
+            if message.text_area.id == "input":
+                self._refresh_input_height()
+
+        def action_submit_message(self) -> None:
+            self.run_worker(self._submit_text(self.input_widget.text), exclusive=True)
+
+        def action_insert_newline(self) -> None:
+            self.input_widget.insert("\n")
+            self._refresh_input_height()
 
         async def _submit_text(self, text: str) -> None:
-            text = text.strip()
+            text = normalize_composer_text(text)
             if not text or self._busy:
-                self.input_widget.value = ""
+                self.input_widget.load_text("")
+                self._refresh_input_height()
                 return
             command_result = self._run_builtin_command(text)
             if command_result:
-                self.input_widget.value = ""
+                self.input_widget.load_text("")
+                self._refresh_input_height()
                 self._reload_transcript()
                 self._refresh_status()
                 return
-            self.input_widget.value = ""
+            self.input_widget.load_text("")
+            self._refresh_input_height()
             self._busy = True
             state.append_message("user", text)
             state.message_count += 1
@@ -562,15 +596,19 @@ def _create_textual_app(
             if probe_input:
                 state.record_debug_event("up")
                 self._refresh_status()
-            self.input_widget.value = state.recall_previous_input(self.input_widget.value)
-            self.input_widget.cursor_position = len(self.input_widget.value)
+            history_text = state.recall_previous_input(self.input_widget.text)
+            self.input_widget.load_text(history_text)
+            self._refresh_input_height()
+            self.input_widget.move_cursor((len(self.input_widget.document.lines) - 1, len(self.input_widget.document.lines[-1])))
 
         def action_history_next(self) -> None:
             if probe_input:
                 state.record_debug_event("down")
                 self._refresh_status()
-            self.input_widget.value = state.recall_next_input(self.input_widget.value)
-            self.input_widget.cursor_position = len(self.input_widget.value)
+            history_text = state.recall_next_input(self.input_widget.text)
+            self.input_widget.load_text(history_text)
+            self._refresh_input_height()
+            self.input_widget.move_cursor((len(self.input_widget.document.lines) - 1, len(self.input_widget.document.lines[-1])))
 
         def action_history_page_up(self) -> None:
             if probe_input:

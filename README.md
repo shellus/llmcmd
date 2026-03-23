@@ -145,6 +145,7 @@ llm chat -I -s ./sessions/product-review.jsonl
 - `llm chat -I "首轮问题"` 会先发送这条首轮消息，再进入连续对话
 - `-I` 模式下只有配合 `-s` 才会回放历史消息并持续写回；不带 `-s` 时为纯内存会话
 - `-I` 基于 `Textual` 全屏 TUI 提供消息区、输入区、输入框上方常驻交互状态行和底部元信息栏
+- 交互输入区支持多行粘贴与手动换行；`Enter` 发送，`Shift+Enter` 或 `Ctrl+J` 换行
 - 历史消息中的 `你 / AI / 系统` 角色标签会独立着色，便于快速分辨轮次边界
 - 当前持久会话先聚焦连续文本对话，不与 `-i/-r/--edit` 组合
 - `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只会覆盖会话开头连续的 system 消息，其余历史保留
