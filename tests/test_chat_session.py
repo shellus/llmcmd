@@ -82,6 +82,8 @@ class ChatSessionTests(unittest.TestCase):
             self.assertEqual(len(lines), 4)
             self.assertIn('"role":"assistant"', lines[-1])
             self.assertIn("新回答", lines[-1])
+            self.assertIn('"meta":{"finished_at":"', lines[-1])
+            self.assertIn('"elapsed_seconds":', lines[-1])
 
     def test_interactive_chat_delegates_to_runner(self):
         with TemporaryDirectory() as tmp:
@@ -155,7 +157,11 @@ class ChatSessionTests(unittest.TestCase):
             session_path=Path("/tmp/demo.jsonl"),
             history_messages=[
                 {"role": "user", "content": "旧问题"},
-                {"role": "assistant", "content": "旧回答"},
+                {
+                    "role": "assistant",
+                    "content": "旧回答",
+                    "meta": {"finished_at": "2026-03-23T14:32:07+08:00", "elapsed_seconds": 6.83},
+                },
             ],
         )
 
@@ -168,7 +174,34 @@ class ChatSessionTests(unittest.TestCase):
         self.assertIn("模型: test-model", toolbar_text)
         self.assertIn("消息: 2", toolbar_text)
         self.assertIn("会话: demo", toolbar_text)
-        self.assertIn("·· ○ idle  -", status_text)
+        self.assertEqual(status_text, "·· ○ idle")
+        separator = state.transcript_lines()[2][0][1]
+        self.assertEqual(separator, "──── 14:32 · 6.83s")
+
+    def test_load_session_messages_preserves_meta_for_history_separator(self):
+        from llm_cli.session import load_session_messages
+
+        with TemporaryDirectory() as tmp:
+            session_path = Path(tmp) / "demo.jsonl"
+            session_path.write_text(
+                '{"type":"message","role":"user","content":"你好","meta":{"started_at":"2026-03-23T14:32:01+08:00"}}\n'
+                '{"type":"message","role":"assistant","content":"你好。","meta":{"finished_at":"2026-03-23T14:32:07+08:00","elapsed_seconds":6.83}}\n',
+                encoding="utf-8",
+            )
+
+            messages = load_session_messages(session_path)
+
+        self.assertEqual(
+            messages,
+            [
+                {"role": "user", "content": "你好", "meta": {"started_at": "2026-03-23T14:32:01+08:00"}},
+                {
+                    "role": "assistant",
+                    "content": "你好。",
+                    "meta": {"finished_at": "2026-03-23T14:32:07+08:00", "elapsed_seconds": 6.83},
+                },
+            ],
+        )
 
     def test_state_streaming_updates_status_and_transcript(self):
         state = InteractiveChatState(
@@ -188,7 +221,7 @@ class ChatSessionTests(unittest.TestCase):
         state.finish_assistant_response()
 
         status_text = "".join(part for _, part in state.status_fragments())
-        self.assertIn("·· ○ idle", status_text)
+        self.assertEqual(status_text, "·· ○ idle")
         self.assertIn("第一段第二段", state.transcript_text)
 
     def test_state_tracks_restore_duration(self):
@@ -203,7 +236,7 @@ class ChatSessionTests(unittest.TestCase):
         state.finish_restore()
 
         status_text = "".join(part for _, part in state.status_fragments())
-        self.assertIn("·· ○ idle", status_text)
+        self.assertEqual(status_text, "·· ○ idle")
 
     def test_state_wait_duration_updates_without_chunks(self):
         state = InteractiveChatState(
@@ -282,7 +315,44 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(lines[0][1][1], "第一行")
         self.assertEqual(lines[1][0][1], "    ")
         self.assertEqual(lines[1][1][1], "第二行")
-        self.assertEqual(lines[2][0][1], "你  ")
+        self.assertEqual(lines[2][0][1], "────")
+        self.assertEqual(lines[3][0][1], "你  ")
+
+    def test_transcript_lines_add_separator_after_assistant_reply(self):
+        state = InteractiveChatState(
+            model="test-model",
+            session_path=Path("/tmp/demo.jsonl"),
+            history_messages=[],
+        )
+
+        state.append_message("user", "用户消息")
+        state.append_message("assistant", "助手消息")
+
+        lines = state.transcript_lines()
+        self.assertEqual(lines[0][0][1], "你  ")
+        self.assertEqual(lines[1][0][1], "AI  ")
+        self.assertEqual(lines[2][0][1], "────")
+        self.assertIn("assistant.separator", lines[2][0][0])
+
+    def test_assistant_separator_contains_time_and_elapsed(self):
+        state = InteractiveChatState(
+            model="test-model",
+            session_path=Path("/tmp/demo.jsonl"),
+            history_messages=[],
+        )
+
+        state.begin_assistant_response()
+        state.write_assistant_chunk("助手消息")
+        time.sleep(0.01)
+        state.finish_assistant_response()
+
+        separator = state.transcript_lines()[1][0][1]
+        self.assertRegex(separator, r"^──── \d{2}:\d{2} · \d+\.\d{2}s$")
+        self.assertRegex(
+            state.transcript_entries[0]["meta"]["finished_at"],
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$",
+        )
+        self.assertGreater(state.transcript_entries[0]["meta"]["elapsed_seconds"], 0)
 
 
     def test_session_name_resolves_to_jsonl_in_current_directory(self):

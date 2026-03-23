@@ -3,6 +3,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+def _now_iso():
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
 def resolve_session_path(session_value=None, *, cwd=None, interactive=False):
     base_dir = Path(cwd or Path.cwd()).resolve()
     if not session_value:
@@ -40,7 +44,11 @@ def load_session_messages(session_path):
         role = record.get("role")
         if role not in {"system", "user", "assistant"}:
             continue
-        messages.append({"role": role, "content": _normalize_content(record.get("content"))})
+        message = {"role": role, "content": _normalize_content(record.get("content"))}
+        meta = record.get("meta")
+        if isinstance(meta, dict) and meta:
+            message["meta"] = meta
+        messages.append(message)
     return messages
 
 
@@ -53,6 +61,9 @@ def append_session_messages(session_path, messages):
                 "type": "message",
                 "role": message["role"],
                 "content": _normalize_content(message.get("content")),
-                "created_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                "created_at": _now_iso(),
             }
+            meta = message.get("meta")
+            if isinstance(meta, dict) and meta:
+                record["meta"] = meta
             handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")

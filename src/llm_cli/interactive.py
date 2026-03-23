@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
@@ -12,6 +13,10 @@ from .task import run_task
 def _session_display_name(session_path):
     path = Path(session_path)
     return path.stem if path.suffix == ".jsonl" else path.name
+
+
+def _request_messages(messages):
+    return [{"role": message["role"], "content": message.get("content", "")} for message in messages]
 
 
 class InteractiveChatState:
@@ -34,6 +39,7 @@ class InteractiveChatState:
         "class:message.user": "",
         "class:message.assistant": "",
         "class:message.system": "#d1d5db",
+        "class:assistant.separator": "#334155",
     }
 
     def __init__(self, *, model, session_path, history_messages):
@@ -48,13 +54,14 @@ class InteractiveChatState:
         self._assistant_open = False
         self._assistant_entry = None
         self._response_started_at = None
+        self._response_started_iso = None
         self._restore_started_at = None
         self.user_inputs = []
         self._history_index = None
         self._history_draft = ""
         self.debug_event = None
         for message in history_messages:
-            self.append_message(message.get("role"), message.get("content", ""))
+            self.append_message(message.get("role"), message.get("content", ""), meta=message.get("meta"))
 
     @property
     def transcript_text(self):
@@ -70,6 +77,8 @@ class InteractiveChatState:
                     lines.append([(role_style, label), (message_style, text_line)])
                 else:
                     lines.append([("", " " * len(label)), (message_style, text_line)])
+            if entry["role"] == "assistant":
+                lines.append([("class:assistant.separator", self._assistant_separator_text(entry))])
         return lines or [[("", "")]]
 
     def transcript_rich_lines(self):
@@ -91,14 +100,15 @@ class InteractiveChatState:
                 ("class:status.time", self.debug_event),
             ]
         symbol, label, token_style = self._status_token()
-        return [
+        fragments = [
             ("class:status.prefix", "·· "),
             (token_style, symbol),
             ("", " "),
             (token_style, label),
-            ("", "  "),
-            ("class:status.time", self.metric_value),
         ]
+        if self.status != "已就绪":
+            fragments.extend([("", "  "), ("class:status.time", self.metric_value)])
+        return fragments
 
     def status_text(self):
         return "".join(part for _, part in self.status_fragments())
@@ -120,7 +130,7 @@ class InteractiveChatState:
     def toolbar_text(self):
         return "".join(part for _, part in self.toolbar_fragments())
 
-    def append_message(self, role, content):
+    def append_message(self, role, content, *, meta=None):
         if role not in self.ROLE_STYLES:
             return
         text = self._normalize_content(content)
@@ -128,7 +138,7 @@ class InteractiveChatState:
             return
         if role == "user":
             self.remember_user_input(text)
-        self.transcript_entries.append({"role": role, "text": text})
+        self.transcript_entries.append({"role": role, "text": text, "meta": dict(meta or {})})
 
     def begin_restore(self):
         self.status = "恢复中"
@@ -149,13 +159,14 @@ class InteractiveChatState:
         self._assistant_open = False
         self._assistant_entry = None
         self._response_started_at = perf_counter()
+        self._response_started_iso = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
     def write_assistant_chunk(self, chunk):
         if not chunk:
             return
         self._refresh_active_elapsed()
         if not self._assistant_open:
-            self.transcript_entries.append({"role": "assistant", "text": ""})
+            self.transcript_entries.append({"role": "assistant", "text": "", "meta": {}})
             self._assistant_entry = self.transcript_entries[-1]
             self._assistant_open = True
             self.status = "接收回复"
@@ -163,11 +174,17 @@ class InteractiveChatState:
 
     def finish_assistant_response(self):
         self._refresh_active_elapsed()
+        if self._assistant_entry is not None:
+            self._assistant_entry["meta"] = {
+                "finished_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                "elapsed_seconds": self._elapsed_seconds(),
+            }
         self._assistant_open = False
         self._assistant_entry = None
         self.status = "已就绪"
         self.phase = "空闲"
         self._response_started_at = None
+        self._response_started_iso = None
 
     def mark_error(self):
         self._refresh_active_elapsed()
@@ -176,6 +193,7 @@ class InteractiveChatState:
         self._assistant_open = False
         self._assistant_entry = None
         self._response_started_at = None
+        self._response_started_iso = None
 
     def remember_user_input(self, text):
         normalized = self._normalize_content(text)
@@ -222,6 +240,28 @@ class InteractiveChatState:
         return self.STATUS_TOKENS.get(self.status) or ("○", "idle", "class:status.idle")
 
     @staticmethod
+    def _assistant_separator_text(entry):
+        meta = entry.get("meta", {})
+        finished_at = meta.get("finished_at")
+        elapsed_seconds = meta.get("elapsed_seconds")
+        if finished_at and elapsed_seconds is not None:
+            try:
+                finished_text = datetime.fromisoformat(finished_at).strftime("%H:%M")
+            except ValueError:
+                finished_text = str(finished_at)
+            return f"──── {finished_text} · {InteractiveChatState._format_elapsed_seconds(elapsed_seconds)}"
+        return "────"
+
+    def current_round_user_message(self, text):
+        return {"role": "user", "content": text, "meta": {"started_at": self._response_started_iso}}
+
+    def current_round_assistant_message(self):
+        if not self.transcript_entries:
+            return {"role": "assistant", "content": "", "meta": {}}
+        entry = self.transcript_entries[-1]
+        return {"role": "assistant", "content": entry["text"], "meta": dict(entry.get("meta") or {})}
+
+    @staticmethod
     def _entry_text(entry):
         label, _, _ = InteractiveChatState.ROLE_STYLES[entry["role"]]
         return f"{label}{entry['text']}\n"
@@ -231,6 +271,17 @@ class InteractiveChatState:
         if started_at is None:
             return "-"
         return f"{max(perf_counter() - started_at, 0):.2f}s"
+
+    def _elapsed_seconds(self):
+        if self._response_started_at is None:
+            return None
+        return round(max(perf_counter() - self._response_started_at, 0), 2)
+
+    @staticmethod
+    def _format_elapsed_seconds(elapsed_seconds):
+        if elapsed_seconds is None:
+            return "-"
+        return f"{float(elapsed_seconds):.2f}s"
 
     @staticmethod
     def _normalize_content(content):
@@ -380,15 +431,15 @@ def _create_textual_app(
 
             try:
                 result = await asyncio.to_thread(
-                    run_task,
-                    "chat",
-                    client,
-                    model,
-                    messages=[*history_messages, {"role": "user", "content": user_text}],
-                    temperature=temperature,
-                    max_output_tokens=max_output_tokens,
-                    stream_handler=handle_chunk,
-                )
+                run_task,
+                "chat",
+                client,
+                model,
+                messages=_request_messages([*history_messages, {"role": "user", "content": user_text}]),
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                stream_handler=handle_chunk,
+            )
             except Exception as exc:
                 state.mark_error()
                 self._on_round_failed(str(exc))
@@ -396,11 +447,12 @@ def _create_textual_app(
 
             if not assistant_parts and result["text"]:
                 state.write_assistant_chunk(result["text"])
+            user_message = state.current_round_user_message(user_text)
             state.finish_assistant_response()
             state.message_count += 1
-            assistant_text = result["text"]
-            append_session_messages(session_path, [{"role": "user", "content": user_text}, {"role": "assistant", "content": assistant_text}])
-            history_messages.extend([{"role": "user", "content": user_text}, {"role": "assistant", "content": assistant_text}])
+            assistant_message = state.current_round_assistant_message()
+            append_session_messages(session_path, [user_message, assistant_message])
+            history_messages.extend([user_message, assistant_message])
             self._on_round_complete()
 
         def _on_transcript_update(self) -> None:

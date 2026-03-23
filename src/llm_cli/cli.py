@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+from time import perf_counter
+
 import click
 
 from . import api
@@ -8,6 +11,10 @@ from .messages import DEFAULT_AUDIO_PROMPT
 from .session import append_session_messages, load_session_messages, resolve_session_path
 from .task import run_task
 from .utils import fail, resolve_text
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
 def _set_debug(ctx, param, value):
@@ -43,6 +50,10 @@ def _render_text_result(result):
 
 def _stream_to_stdout(chunk):
     click.echo(chunk, nl=False)
+
+
+def _request_messages(messages):
+    return [{"role": message["role"], "content": message.get("content", "")} for message in messages]
 
 
 def _run_chat_once(
@@ -86,9 +97,11 @@ def _run_chat_once(
         prompt_text = resolve_text(prompt)
         if not prompt_text:
             fail("持久会话模式至少需要 prompt")
-        user_message = {"role": "user", "content": prompt_text}
+        started_at = _now_iso()
+        started_counter = perf_counter()
+        user_message = {"role": "user", "content": prompt_text, "meta": {"started_at": started_at}}
         task_kwargs = {
-            "messages": [*history_messages, user_message],
+            "messages": _request_messages([*history_messages, user_message]),
             "output": output,
             "temperature": temperature,
             "max_output_tokens": max_output_tokens,
@@ -102,7 +115,18 @@ def _run_chat_once(
         **task_kwargs,
     )
     if session_path:
-        append_session_messages(session_path, [user_message, {"role": "assistant", "content": result["text"]}])
+        elapsed_seconds = round(max(perf_counter() - started_counter, 0), 2)
+        append_session_messages(
+            session_path,
+            [
+                user_message,
+                {
+                    "role": "assistant",
+                    "content": result["text"],
+                    "meta": {"finished_at": _now_iso(), "elapsed_seconds": elapsed_seconds},
+                },
+            ],
+        )
     return result
 
 
