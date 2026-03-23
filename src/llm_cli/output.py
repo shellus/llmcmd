@@ -43,6 +43,11 @@ def extract_text_result(response):
     return str(content or "").strip()
 
 
+def response_has_images(response):
+    message = response.choices[0].message
+    return bool(getattr(message, "images", None))
+
+
 def image_output_path(output_path, index):
     output_path = Path(output_path)
     return output_path if index == 0 else output_path.with_stem(f"{output_path.stem}_{index}")

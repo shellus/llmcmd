@@ -1,5 +1,7 @@
 import json
 import sys
+import copy
+from types import SimpleNamespace
 
 DEBUG = False
 
@@ -14,6 +16,45 @@ def debug_log(*args, **kwargs):
         print("[DEBUG]", *args, **kwargs, file=sys.stderr)
 
 
+def _model_to_dict(value):
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return model_dump()
+    return None
+
+
+def _finalize_stream_response(content_parts, image_parts, refusal_parts):
+    message = SimpleNamespace(
+        content="".join(content_parts),
+        images=image_parts or None,
+        refusal="".join(refusal_parts).strip() or None,
+    )
+    choice = SimpleNamespace(message=message)
+    return SimpleNamespace(choices=[choice])
+
+
+def sanitize_debug_value(value, *, limit=100):
+    cloned = copy.deepcopy(value)
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, sub in list(node.items()):
+                if key in {"file_data", "data", "url"} and len(str(sub)) > limit:
+                    node[key] = str(sub)[:50] + f"...<truncated, total {len(str(sub))} chars>"
+                else:
+                    walk(sub)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(cloned)
+    return cloned
+
+
 def api_call(client, model, messages, temperature=None, max_output_tokens=None, stream_handler=None):
     kwargs = {
         "model": model,
@@ -25,90 +66,38 @@ def api_call(client, model, messages, temperature=None, max_output_tokens=None, 
         kwargs["temperature"] = temperature
     if max_output_tokens is not None:
         kwargs["max_tokens"] = max_output_tokens
+    kwargs["stream"] = True
 
     if DEBUG:
-        import copy
-        debug_kwargs = copy.deepcopy(kwargs)
-        # 截断 base64 数据避免刷屏
-        for msg in debug_kwargs.get("messages", []):
-            content = msg.get("content")
-            if isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict):
-                        for key in ("file", "input_audio", "image_url"):
-                            if key in item:
-                                sub = item[key]
-                                if isinstance(sub, dict):
-                                    for field in ("file_data", "data", "url"):
-                                        if field in sub and len(str(sub[field])) > 100:
-                                            sub[field] = sub[field][:50] + f"...<truncated, total {len(sub[field])} chars>"
+        debug_kwargs = sanitize_debug_value(kwargs)
         debug_log("请求方法:", request_method)
         debug_log("请求 URL:", request_url)
         debug_log("请求参数:", json.dumps(debug_kwargs, ensure_ascii=False, indent=2))
 
-    if stream_handler:
-        kwargs["stream"] = True
-        stream = client.chat.completions.create(**kwargs)
+    stream = client.chat.completions.create(**kwargs)
 
-        content_parts = []
-        for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                delta = chunk.choices[0].delta.content
-                content_parts.append(delta)
-                stream_handler(delta)
+    content_parts = []
+    image_parts = []
+    refusal_parts = []
+    for chunk in stream:
+        if not getattr(chunk, "choices", None):
+            continue
+        delta = chunk.choices[0].delta
+        content = getattr(delta, "content", None)
+        if content is not None:
+            content_parts.append(content)
+            if content and stream_handler:
+                stream_handler(content)
+        refusal = getattr(delta, "refusal", None)
+        if refusal:
+            refusal_parts.append(str(refusal))
+        images = getattr(delta, "images", None)
+        if images:
+            for image in images:
+                image_parts.append(_model_to_dict(image) or image)
 
-        full_content = "".join(content_parts)
-        if DEBUG:
-            debug_log("流式收集 content:", repr(full_content[:500]))
-
-        class FakeMessage:
-            def __init__(self, content):
-                self.content = content
-                self.images = None
-
-        class FakeChoice:
-            def __init__(self, message):
-                self.message = message
-
-        class FakeResponse:
-            def __init__(self, content):
-                self.choices = [FakeChoice(FakeMessage(content))]
-
-        return FakeResponse(full_content)
-
-    try:
-        response = client.chat.completions.create(**kwargs)
-        if DEBUG:
-            msg = response.choices[0].message
-            debug_log("响应 content:", repr((getattr(msg, "content", None) or "")[:500]))
-            debug_log("响应 images:", getattr(msg, "images", None))
-        return response
-    except json.JSONDecodeError:
-        # 上游返回 SSE 流式，fallback 到 stream=True
-        debug_log("JSONDecodeError，fallback 到 stream=True")
-        kwargs["stream"] = True
-        stream = client.chat.completions.create(**kwargs)
-
-        content_parts = []
-        for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                content_parts.append(chunk.choices[0].delta.content)
-
-        full_content = "".join(content_parts)
-        if DEBUG:
-            debug_log("流式收集 content:", repr(full_content[:500]))
-
-        class FakeMessage:
-            def __init__(self, content):
-                self.content = content
-                self.images = None
-
-        class FakeChoice:
-            def __init__(self, message):
-                self.message = message
-
-        class FakeResponse:
-            def __init__(self, content):
-                self.choices = [FakeChoice(FakeMessage(content))]
-
-        return FakeResponse(full_content)
+    full_content = "".join(content_parts)
+    if DEBUG:
+        debug_log("流式收集 content:", repr(full_content[:500]))
+        debug_log("流式收集 images:", sanitize_debug_value(image_parts[:1] if image_parts else None))
+    return _finalize_stream_response(content_parts, image_parts, refusal_parts)

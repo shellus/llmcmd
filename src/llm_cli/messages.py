@@ -3,17 +3,6 @@ from pathlib import Path
 from .files import load_binary_attachment
 from .utils import fail, join_message_parts
 
-DEFAULT_AUDIO_PROMPT = """你是一个音频转录助手。请将提供的音频精确转录为 SRT 字幕格式。
-
-要求：
-- 使用标准 SRT 格式（序号、时间戳、文本）
-- 时间戳格式：HH:MM:SS,mmm --> HH:MM:SS,mmm
-- 逐字转录，包括口语化表达
-- 如有多个说话人，用 [说话人1]、[说话人2] 标注
-- 使用中文回复
-- 仅输出 SRT 内容，不要添加任何说明或注释
-"""
-
 DEFAULT_EDIT_PROMPT = """你是一个严谨的文本编辑助手。你会收到一份原始文件内容，以及用户的修改要求。
 
 请严格遵守以下规则：

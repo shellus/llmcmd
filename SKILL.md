@@ -60,6 +60,9 @@ llm chat "按要求改写" --edit 商务女性生图.md -o 商务女性生图.v2
 - 非 edit 模式下，有 `-o` 时写入文件；无 `-o` 时输出到终端
 - 当前持久会话模式先专注文本连续对话，不与 `-i/-r/--edit` 组合
 - `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只会覆盖会话开头连续的 system 消息，其余历史保留
+- `chat` / `image` / `audio` 当前统一通过流式请求收集结果
+- 非交互 `chat` 与 `audio` 会实时把流式文本写到 stdout
+- 若 `chat` 使用图片模型并返回图片，会自动落盘并显示图片路径
 
 ## image
 
@@ -88,18 +91,19 @@ llm image "生成三张海报方案" -n 3 -o poster.jpg
 ## audio
 
 ```bash
-llm audio demo.mp3
-llm audio demo.mp3 -o demo.srt
-llm audio demo.mp3 -p @prompt.txt
-llm audio demo.mp3 -p "请转成带说话人标注的 SRT" -s @system.txt
+llm audio "总结录音内容" -r demo.mp3
+llm audio -r demo.mp3
+llm audio @prompt.txt -r demo.mp3
+llm audio "请转成带说话人标注的 SRT" -r demo.mp3 -s @system.txt -o demo.srt
 ```
 
 规则：
 
-- 主位置参数必须是音频文件路径
-- `-p/--prompt` 为可选附加要求，支持字面量或 `@文件`
+- 主位置参数为可选 prompt，支持字面量或 `@文件`
+- `-r/--reference` 必须传音频文件路径
 - `-s/--system` 支持字面量或 `@文件`
-- 无 `-o` 时，默认输出为音频同目录同名 `.srt`
+- 无 `-o` 时，默认实时输出到终端
+- 若要 SRT，请直接在 prompt 里明确要求输出标准 SRT
 
 ## batch
 

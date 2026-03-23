@@ -76,11 +76,12 @@ llm image @prompts/couple-photo.md -i prompts/keep-outfit-and-accessories.md -r 
 - `poster_1.jpg`
 - `poster_2.jpg`
 
-### 5. 音频转录为字幕
+### 5. 音频转录或总结
 
 ```bash
-llm audio demo.m4a -o demo.srt
-llm audio demo.m4a -p "请转成带说话人标注的 SRT"
+llm audio "总结录音内容" -r demo.m4a
+llm audio -r demo.m4a
+llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
 ```
 
 ### 6. YAML 批量编排
@@ -151,12 +152,15 @@ llm chat -I -s ./sessions/product-review.jsonl
 - `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只会覆盖会话开头连续的 system 消息，其余历史保留
 - 交互式内置命令：`/clear` 清空当前会话，`/model <name>` 切换当前模型并写回 `CHAT_MODEL`，`/save <name-or-path>` 将当前会话保存到指定文件
 - 如需使用终端原生鼠标拖选复制历史消息，请按住终端模拟器的修饰键；当前环境实测为按住 `Shift` 再拖选
+- `chat` / `image` / `audio` 当前统一通过流式请求收集结果
+- 非交互 `chat` 与 `audio` 会实时把流式文本写到 stdout
+- 若 `chat` 使用图片模型并返回图片，会自动落盘并显示图片路径
 
 ### `llm image`
 用于图片生成或参考图编辑，支持 `-n/--count` 多图生成。
 
 ### `llm audio`
-用于音频转录，输出文本或 SRT。
+用于把音频送入模型处理，位置参数是 prompt，`-r/--reference` 传音频文件；默认实时输出到 stdout，仅在传 `-o` 时写文件。若要 SRT，请直接在 prompt 中明确要求。
 
 ### `llm batch`
 用于 YAML 批量任务编排。

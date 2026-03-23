@@ -1,3 +1,4 @@
+import sys
 from datetime import datetime, timezone
 from time import perf_counter
 
@@ -7,7 +8,6 @@ from . import api
 from .batch import run_batch
 from .config import create_client
 from .interactive import run_interactive_chat
-from .messages import DEFAULT_AUDIO_PROMPT
 from .session import append_session_messages, load_session_messages, replace_leading_system_messages, resolve_session_path, rewrite_session_messages
 from .task import run_task
 from .utils import fail, resolve_text
@@ -42,14 +42,19 @@ def _image_progress(event, **payload):
 
 
 def _render_text_result(result):
-    if result.get("output_path"):
+    if result.get("output_paths"):
+        print("已写入图片:", ", ".join(result["output_paths"]))
+    elif result.get("output_path"):
         print(f"已写入: {result['output_path']}")
+    elif result.get("already_streamed"):
+        click.echo()
     else:
         print(result["text"])
 
 
 def _stream_to_stdout(chunk):
-    click.echo(chunk, nl=False)
+    sys.stdout.write(chunk)
+    sys.stdout.flush()
 
 
 def _request_messages(messages):
@@ -84,6 +89,7 @@ def _run_chat_once(
         "max_output_tokens": max_output_tokens,
         "edit_path": edit_path,
     }
+    should_stream_output = output is None
     user_message = None
     if session_path:
         if edit_path:
@@ -113,8 +119,11 @@ def _run_chat_once(
         "chat",
         client,
         resolved_model,
+        stream_handler=_stream_to_stdout if should_stream_output else None,
         **task_kwargs,
     )
+    if should_stream_output and not result.get("output_paths") and result.get("text"):
+        result["already_streamed"] = True
     if session_path:
         elapsed_seconds = round(max(perf_counter() - started_counter, 0), 2)
         append_session_messages(
@@ -259,26 +268,25 @@ def image(prompt, input_files, reference, system, output, count, model, temperat
 @cli.command(
     epilog="""\b
 使用示例:
-  llm audio demo.m4a
-  llm audio demo.m4a -p "转成逐字稿"
-  llm audio demo.m4a -o demo.srt
+  llm audio "总结录音内容" -r demo.m4a
+  llm audio -r demo.m4a
+  llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
 """
 )
-@click.argument("audio_file", metavar="AUDIO_FILE")
-@click.option("-p", "--prompt", default=None, help="prompt 文本，或使用 @文件路径 从文件读取")
+@click.argument("prompt", required=False, default=None, metavar="[PROMPT|@FILE]")
+@click.option("-r", "--reference", "audio_file", required=True, help="音频文件路径")
 @click.option("-s", "--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
 @click.option("-o", "--output", default=None, help="输出路径")
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
-def audio(audio_file, prompt, system, output, model, temperature, max_output_tokens):
+def audio(prompt, audio_file, system, output, model, temperature, max_output_tokens):
     """音频转录为文本或 SRT。
 
-    AUDIO_FILE 为必填音频文件路径。
-    额外要求通过 -p/--prompt 指定，支持字面量或 @文件路径。
+    PROMPT 支持直接传字面量，也支持使用 @文件路径 从文件读取。
+    音频文件通过 -r/--reference 传入。
     """
-    prompt = prompt or DEFAULT_AUDIO_PROMPT
     client, resolved_model, _ = create_client("audio", explicit_model=model)
     result = _run_safely(
         run_task,
@@ -291,8 +299,15 @@ def audio(audio_file, prompt, system, output, model, temperature, max_output_tok
         output=output,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
+        stream_handler=_stream_to_stdout,
     )
-    print(f"已写入: {result['output_path']}")
+    if result.get("text"):
+        result["already_streamed"] = True
+    if output:
+        click.echo()
+        print(f"已写入: {result['output_path']}")
+    elif not result.get("already_streamed"):
+        _render_text_result(result)
 
 
 @cli.command(

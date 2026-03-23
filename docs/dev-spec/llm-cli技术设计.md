@@ -14,7 +14,7 @@
 | `src/llm_cli/config.py` | 读取 `~/.config/llm-api/.env`，解析模型与并发配置，创建 OpenAI 客户端 |
 | `src/llm_cli/task.py` | 统一任务执行入口，负责把参数转成消息、调用上游、整理输出 |
 | `src/llm_cli/messages.py` | 按 `chat / image / audio / chat_edit` 构造消息体 |
-| `src/llm_cli/api.py` | 统一调用 `chat.completions.create()`，处理调试输出与流式 fallback |
+| `src/llm_cli/api.py` | 统一调用 `chat.completions.create(stream=True)`，收集文本与图片等流式结果 |
 | `src/llm_cli/output.py` | 提取文本/图片结果，处理默认输出路径与 edit diff 应用 |
 | `src/llm_cli/batch.py` | 解析 YAML，准备任务规格，并发执行批处理 |
 | `src/llm_cli/session.py` | `chat -s/-I` 的 JSONL 会话持久化 |
@@ -31,7 +31,7 @@
 Click 子命令
   -> create_client(mode)
   -> run_task(...)
-  -> api_call(...)
+  -> api_call(stream=True)
   -> extract_text_result() / extract_image_result()
   -> 写文件或输出终端
 ```
@@ -123,7 +123,10 @@ session.py 读取 JSONL
 维护时注意：
 
 - 图片结果优先读取 `message.images`
+- `chat` 模式若检测到图片响应，也按图片结果落盘并返回路径，不再把 base64 当文本输出
 - 如果上游返回 Markdown 图片链接，则回退到正则提取并下载
+- `chat / image / audio` 请求统一走 `stream=True`
+- 非交互 `chat / audio` 必须把流式文本实时写到 stdout，不允许等完整响应后一次性输出
 - edit 模式必须保持“唯一定位 + 最小修改”，不能放宽 SEARCH 匹配规则
 
 ## 扩展建议

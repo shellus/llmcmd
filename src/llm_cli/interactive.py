@@ -519,13 +519,22 @@ def _create_textual_app(
 
             if not assistant_parts and result["text"]:
                 state.write_assistant_chunk(result["text"])
-            state.finish_assistant_response()
-            state.message_count += 1
-            finalize_successful_round(
-                state=state,
-                history_messages=history_messages,
-                user_text=user_text,
-            )
+            if result.get("output_paths"):
+                state.finish_assistant_response()
+                finalize_image_round(
+                    state=state,
+                    history_messages=history_messages,
+                    user_text=user_text,
+                    output_paths=result["output_paths"],
+                )
+            else:
+                state.finish_assistant_response()
+                state.message_count += 1
+                finalize_successful_round(
+                    state=state,
+                    history_messages=history_messages,
+                    user_text=user_text,
+                )
             self._on_round_complete()
 
         def _run_builtin_command(self, text: str) -> bool:
@@ -715,5 +724,17 @@ def finalize_successful_round(*, state, history_messages, user_text):
         state.current_round_assistant_message(),
     ]
     history_messages.extend(round_messages)
+    if state.session_path:
+        append_session_messages(state.session_path, round_messages)
+
+
+def finalize_image_round(*, state, history_messages, user_text, output_paths):
+    round_messages = [
+        state.current_round_user_message(user_text),
+        {"role": "system", "content": f"已写入图片: {', '.join(output_paths)}"},
+    ]
+    history_messages.extend(round_messages)
+    state.message_count += 1
+    state.append_message("system", round_messages[-1]["content"])
     if state.session_path:
         append_session_messages(state.session_path, round_messages)

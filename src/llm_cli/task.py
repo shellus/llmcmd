@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .api import api_call
 from .config import get_mode_concurrency
 from .messages import DEFAULT_EDIT_PROMPT, build_messages
-from .output import apply_search_replace_blocks, default_output_path, extract_image_result, extract_text_result, write_text_output
+from .output import apply_search_replace_blocks, default_output_path, extract_image_result, extract_text_result, response_has_images, write_text_output
 from .utils import read_input_files, read_text_file, resolve_path, resolve_text
 
 
@@ -116,12 +116,19 @@ def run_task(
             progress_callback("done", total=image_count, paths=saved_paths)
         return {"mode": mode, "output_paths": saved_paths, "printed": False}
 
+    if mode in {"chat", "text"} and response_has_images(response):
+        output_path = output or default_output_path("image")
+        output_path = str(resolve_path(output_path, base_dir=base_dir)) if output else output_path
+        saved_paths = extract_image_result(response, output_path)
+        return {"mode": mode, "output_paths": saved_paths, "printed": False}
+
     text = extract_text_result(response)
     if mode == "audio":
-        output_path = output or default_output_path("audio", source_path=audio_path)
-        output_path = str(resolve_path(output_path, base_dir=base_dir)) if output else output_path
-        saved_path = write_text_output(output_path, text)
-        return {"mode": mode, "text": text, "output_path": saved_path, "printed": False}
+        if output:
+            output_path = str(resolve_path(output, base_dir=base_dir))
+            saved_path = write_text_output(output_path, text)
+            return {"mode": mode, "text": text, "output_path": saved_path, "printed": False}
+        return {"mode": mode, "text": text, "printed": True}
 
     if edit_source_path:
         updated_text = apply_search_replace_blocks(edit_source_text, text)

@@ -1,6 +1,8 @@
 import os
 import time
 import unittest
+from types import SimpleNamespace
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -12,6 +14,56 @@ from llm_cli.interactive import InteractiveChatState, run_interactive_chat
 
 
 class ChatSessionTests(unittest.TestCase):
+    def test_api_call_stream_collects_image_deltas(self):
+        from llm_cli.api import api_call
+
+        image_url = "data:image/png;base64,AAAA"
+        stream = [
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(
+                            content=None,
+                            refusal=None,
+                            role="assistant",
+                            images=[{"type": "image_url", "image_url": {"url": image_url}}],
+                        )
+                    )
+                ]
+            ),
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="", refusal=None, role="assistant", images=None)
+                    )
+                ]
+            ),
+        ]
+
+        client = SimpleNamespace(
+            base_url="https://example.com/v1",
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **kwargs: stream)
+            ),
+        )
+
+        response = api_call(client, "test-model", [{"role": "user", "content": "测试"}])
+
+        self.assertEqual(response.choices[0].message.content, "")
+        self.assertEqual(response.choices[0].message.images, [{"type": "image_url", "image_url": {"url": image_url}}])
+
+    def test_sanitize_debug_value_truncates_response_base64(self):
+        from llm_cli.api import sanitize_debug_value
+
+        image_url = "data:image/png;base64," + ("A" * 300)
+        sanitized = sanitize_debug_value(
+            [{"type": "image_url", "image_url": {"url": image_url}}],
+            limit=50,
+        )
+
+        self.assertIn("...<truncated, total", sanitized[0]["image_url"]["url"])
+        self.assertNotEqual(sanitized[0]["image_url"]["url"], image_url)
+
     def test_image_command_passes_all_references_to_run_task(self):
         captured = {}
 
@@ -46,6 +98,147 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(captured["input_paths"], ("constraint-a.md", "constraint-b.md"))
 
+    def test_chat_command_renders_output_paths_when_chat_model_returns_image(self):
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            return {"mode": mode, "output_paths": ["/tmp/chat-image.jpg"], "printed": False}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["chat", "画一只猫"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("已写入图片: /tmp/chat-image.jpg", result.output)
+
+    def test_chat_command_passes_stream_handler_for_noninteractive_stdout(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["stream_handler"] = kwargs.get("stream_handler")
+            return {"mode": mode, "text": "回答", "printed": True}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["chat", "你好"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertTrue(callable(captured["stream_handler"]))
+
+    def test_stream_to_stdout_flushes_immediately(self):
+        from llm_cli import cli as cli_module
+
+        class FakeStdout:
+            def __init__(self):
+                self.buffer = []
+                self.flush_count = 0
+
+            def write(self, text):
+                self.buffer.append(text)
+
+            def flush(self):
+                self.flush_count += 1
+
+        fake_stdout = FakeStdout()
+        with patch.object(cli_module.sys, "stdout", fake_stdout):
+            cli_module._stream_to_stdout("分片内容")
+
+        self.assertEqual("".join(fake_stdout.buffer), "分片内容")
+        self.assertEqual(fake_stdout.flush_count, 1)
+
+    def test_run_task_chat_returns_output_paths_when_response_contains_images(self):
+        from llm_cli.task import run_task
+
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=None,
+                        images=[{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}],
+                        refusal=None,
+                    )
+                )
+            ]
+        )
+
+        with TemporaryDirectory() as tmp:
+            with patch("llm_cli.task.api_call", lambda *args, **kwargs: response):
+                result = run_task(
+                    "chat",
+                    object(),
+                    "test-model",
+                    prompt="生成图片",
+                    output=str(Path(tmp) / "chat-image.png"),
+                )
+
+        self.assertEqual(result["mode"], "chat")
+        self.assertEqual(len(result["output_paths"]), 1)
+        self.assertTrue(result["output_paths"][0].endswith("chat-image.png"))
+
+    def test_audio_command_uses_prompt_argument_and_reference_file(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured.update(kwargs)
+            kwargs["stream_handler"]("输出内容")
+            return {"mode": mode, "text": "输出内容", "printed": True}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["audio", "总结录音内容", "-r", "demo.m4a"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["prompt"], "总结录音内容")
+        self.assertEqual(captured["audio_file"], "demo.m4a")
+        self.assertIsNone(captured["output"])
+        self.assertTrue(callable(captured["stream_handler"]))
+        self.assertIn("输出内容", result.output)
+
+    def test_audio_command_requires_reference_audio_file(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["audio", "总结录音内容"])
+        self.assertNotEqual(result.exit_code, 0)
+
+    def test_debug_logs_include_stream_true(self):
+        from llm_cli import api as api_module
+
+        client = SimpleNamespace(
+            base_url="https://example.com/v1",
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(
+                    create=lambda **kwargs: [
+                        SimpleNamespace(
+                            choices=[
+                                SimpleNamespace(
+                                    delta=SimpleNamespace(content="测试", refusal=None, role="assistant", images=None)
+                                )
+                            ]
+                        )
+                    ]
+                )
+            ),
+        )
+
+        stderr = StringIO()
+        old_stderr = os.sys.stderr
+        old_debug = api_module.DEBUG
+        os.sys.stderr = stderr
+        api_module.set_debug(True)
+        try:
+            api_module.api_call(client, "test-model", [{"role": "user", "content": "hi"}])
+        finally:
+            os.sys.stderr = old_stderr
+            api_module.set_debug(old_debug)
+
+        self.assertIn('"stream": true', stderr.getvalue().lower())
+
     def test_single_chat_with_session_loads_history_and_appends(self):
         with TemporaryDirectory() as tmp:
             session_path = Path(tmp) / "demo.jsonl"
@@ -62,6 +255,8 @@ class ChatSessionTests(unittest.TestCase):
 
             def fake_run_task(mode, client, model, **kwargs):
                 captured["messages"] = kwargs["messages"]
+                if kwargs.get("stream_handler"):
+                    kwargs["stream_handler"]("新回答")
                 return {"mode": mode, "text": "新回答", "printed": True}
 
             runner = CliRunner()
@@ -633,6 +828,35 @@ class ChatSessionTests(unittest.TestCase):
             self.assertEqual(len(lines), 2)
             self.assertIn('"role":"user"', lines[0])
             self.assertIn('"role":"assistant"', lines[1])
+
+    def test_finalize_image_round_persists_output_path_message(self):
+        from llm_cli.interactive import InteractiveChatState, finalize_image_round
+
+        with TemporaryDirectory() as tmp:
+            session_path = Path(tmp) / "image.jsonl"
+            history_messages = []
+            state = InteractiveChatState(
+                model="test-model",
+                session_path=session_path,
+                history_messages=[],
+            )
+            state.begin_assistant_response()
+            state.finish_assistant_response()
+
+            finalize_image_round(
+                state=state,
+                history_messages=history_messages,
+                user_text="画一只猫",
+                output_paths=["/tmp/cat.jpg"],
+            )
+
+            self.assertEqual(
+                history_messages,
+                [
+                    {"role": "user", "content": "画一只猫", "meta": {"started_at": None}},
+                    {"role": "system", "content": "已写入图片: /tmp/cat.jpg"},
+                ],
+            )
 
     def test_build_messages_keeps_multiple_reference_images_for_image_mode(self):
         from llm_cli.messages import build_messages
