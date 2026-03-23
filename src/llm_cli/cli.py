@@ -135,8 +135,9 @@ def cli():
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
+@click.option("--probe-input", is_flag=True, hidden=True, help="调试交互式输入事件")
 @click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
-def chat(prompt, input_files, reference, edit_path, session_name, system, interactive, output, model, temperature, max_output_tokens):
+def chat(prompt, input_files, reference, edit_path, session_name, system, interactive, output, model, temperature, max_output_tokens, probe_input):
     """对话/文本生成。
 
     PROMPT 支持直接传字面量，也支持使用 @文件路径 从文件读取。
@@ -158,6 +159,7 @@ def chat(prompt, input_files, reference, edit_path, session_name, system, intera
             temperature=temperature,
             max_output_tokens=max_output_tokens,
             history_messages=load_session_messages(session_path),
+            probe_input=probe_input,
         )
         return
 

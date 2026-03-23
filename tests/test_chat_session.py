@@ -8,7 +8,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from llm_cli.cli import cli
-from llm_cli.interactive import InteractiveChatState, _TranscriptLexer, run_interactive_chat
+from llm_cli.interactive import InteractiveChatState, run_interactive_chat
 
 
 class ChatSessionTests(unittest.TestCase):
@@ -105,6 +105,26 @@ class ChatSessionTests(unittest.TestCase):
             self.assertEqual(captured["prompt"], "你好")
             self.assertEqual(captured["session_path"], session_path.resolve())
 
+    def test_interactive_chat_passes_input_probe_flag(self):
+        with TemporaryDirectory() as tmp:
+            session_path = Path(tmp) / "interactive.jsonl"
+            captured = {}
+
+            def fake_create_client(mode, explicit_model=None):
+                return object(), "test-model", {}
+
+            def fake_run_interactive_chat(**kwargs):
+                captured.update(kwargs)
+
+            runner = CliRunner()
+            with patch("llm_cli.cli.create_client", fake_create_client), patch(
+                "llm_cli.cli.run_interactive_chat", fake_run_interactive_chat
+            ):
+                result = runner.invoke(cli, ["chat", "-I", "--probe-input", "-s", str(session_path)])
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertTrue(captured["probe_input"])
+
     def test_interactive_defaults_to_hidden_session_file_in_cwd(self):
         with TemporaryDirectory() as tmp:
             captured = {}
@@ -128,53 +148,6 @@ class ChatSessionTests(unittest.TestCase):
 
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(captured["session_path"], (Path(tmp) / ".llm-chat.jsonl").resolve())
-
-    def test_run_interactive_chat_counts_loaded_history_in_toolbar(self):
-        captured = {}
-
-        class DummyApp:
-            def run(self, pre_run=None):
-                if pre_run:
-                    pre_run()
-
-            def invalidate(self):
-                return None
-
-            def create_background_task(self, coro):
-                captured["background_task"] = coro
-
-        class DummyBuffer:
-            def set_document(self, document, bypass_readonly=False):
-                captured["synced_text"] = document.text
-
-        class DummyOutputArea:
-            def __init__(self):
-                self.buffer = DummyBuffer()
-
-        def fake_create_application(state, *, on_submit):
-            captured["message_count"] = state.message_count
-            captured["transcript_text"] = state.transcript_text
-            return DummyApp(), DummyOutputArea()
-
-        history_messages = [
-            {"role": "user", "content": "旧问题"},
-            {"role": "assistant", "content": "旧回答"},
-        ]
-
-        with patch("llm_cli.interactive._create_application", fake_create_application):
-            run_interactive_chat(
-                client=object(),
-                model="test-model",
-                prompt=None,
-                session_path=Path("/tmp/demo.jsonl"),
-                temperature=None,
-                max_output_tokens=None,
-                history_messages=history_messages,
-            )
-
-        self.assertEqual(captured["message_count"], 2)
-        self.assertIn("旧问题", captured["transcript_text"])
-        self.assertIn("旧回答", captured["transcript_text"])
 
     def test_state_replays_history_and_updates_toolbar(self):
         state = InteractiveChatState(
@@ -263,40 +236,54 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(fragments[3], ("class:status.load", "load"))
         self.assertEqual(fragments[-1][0], "class:status.time")
 
-    def test_transcript_fragments_separate_role_and_content_styles(self):
+    def test_user_input_history_replays_previous_messages(self):
+        state = InteractiveChatState(
+            model="test-model",
+            session_path=Path("/tmp/demo.jsonl"),
+            history_messages=[
+                {"role": "user", "content": "第一句"},
+                {"role": "assistant", "content": "回答"},
+                {"role": "user", "content": "第二句"},
+            ],
+        )
+
+        self.assertEqual(state.recall_previous_input(""), "第二句")
+        self.assertEqual(state.recall_previous_input(""), "第一句")
+        self.assertEqual(state.recall_next_input(""), "第二句")
+        self.assertEqual(state.recall_next_input(""), "")
+
+    def test_user_input_history_keeps_current_draft_when_replaying(self):
         state = InteractiveChatState(
             model="test-model",
             session_path=Path("/tmp/demo.jsonl"),
             history_messages=[],
         )
 
-        state.append_message("user", "用户消息")
-        state.append_message("assistant", "助手消息")
-        state.append_message("system", "系统消息")
+        state.remember_user_input("第一句")
+        state.remember_user_input("第二句")
 
-        fragments = state.transcript_fragments()
+        self.assertEqual(state.recall_previous_input("草稿"), "第二句")
+        self.assertEqual(state.recall_previous_input("第二句"), "第一句")
+        self.assertEqual(state.recall_next_input("第一句"), "第二句")
+        self.assertEqual(state.recall_next_input("第二句"), "草稿")
 
-        self.assertIn(("class:role.user", "你  "), fragments)
-        self.assertIn(("class:role.assistant", "AI  "), fragments)
-        self.assertIn(("class:role.system", "系统"), fragments)
-        self.assertIn(("class:message.user", "用户消息"), fragments)
-        self.assertIn(("class:message.assistant", "助手消息"), fragments)
-        self.assertIn(("class:message.system", "系统消息"), fragments)
-
-    def test_transcript_lexer_colors_role_prefixes(self):
-        from prompt_toolkit.document import Document
-
-        lexer = _TranscriptLexer()
-        get_line = lexer.lex_document(
-            Document(
-                text="你  用户消息\nAI  助手消息\n系统系统消息\n普通文本",
-            )
+    def test_transcript_lines_include_role_prefix_and_indented_wrapped_lines(self):
+        state = InteractiveChatState(
+            model="test-model",
+            session_path=Path("/tmp/demo.jsonl"),
+            history_messages=[],
         )
 
-        self.assertEqual(get_line(0), [("class:role.user", "你  "), ("class:message.user", "用户消息")])
-        self.assertEqual(get_line(1), [("class:role.assistant", "AI  "), ("class:message.assistant", "助手消息")])
-        self.assertEqual(get_line(2), [("class:role.system", "系统"), ("class:message.system", "系统消息")])
-        self.assertEqual(get_line(3), [("", "普通文本")])
+        state.append_message("assistant", "第一行\n第二行")
+        state.append_message("user", "用户消息")
+
+        lines = state.transcript_lines()
+        self.assertEqual(lines[0][0][1], "AI  ")
+        self.assertEqual(lines[0][1][1], "第一行")
+        self.assertEqual(lines[1][0][1], "    ")
+        self.assertEqual(lines[1][1][1], "第二行")
+        self.assertEqual(lines[2][0][1], "你  ")
+
 
     def test_session_name_resolves_to_jsonl_in_current_directory(self):
         from llm_cli.session import resolve_session_path

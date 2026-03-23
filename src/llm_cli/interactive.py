@@ -3,7 +3,7 @@ from pathlib import Path
 from time import perf_counter
 
 import click
-from prompt_toolkit.document import Document
+from rich.text import Text
 
 from .session import append_session_messages
 from .task import run_task
@@ -12,25 +12,6 @@ from .task import run_task
 def _session_display_name(session_path):
     path = Path(session_path)
     return path.stem if path.suffix == ".jsonl" else path.name
-
-
-class _TranscriptLexer:
-    ROLE_PREFIXES = {
-        "你  ": ("class:role.user", "class:message.user"),
-        "AI  ": ("class:role.assistant", "class:message.assistant"),
-        "系统": ("class:role.system", "class:message.system"),
-    }
-
-    def lex_document(self, document):
-        def get_line(lineno):
-            line = document.lines[lineno]
-            for prefix, styles in self.ROLE_PREFIXES.items():
-                if line.startswith(prefix):
-                    role_style, message_style = styles
-                    return [(role_style, prefix), (message_style, line[len(prefix) :])]
-            return [("", line)]
-
-        return get_line
 
 
 class InteractiveChatState:
@@ -46,6 +27,14 @@ class InteractiveChatState:
         "assistant": ("AI  ", "class:role.assistant", "class:message.assistant"),
         "system": ("系统", "class:role.system", "class:message.system"),
     }
+    RICH_STYLES = {
+        "class:role.user": "bold #60a5fa",
+        "class:role.assistant": "bold #34d399",
+        "class:role.system": "bold #fbbf24",
+        "class:message.user": "",
+        "class:message.assistant": "",
+        "class:message.system": "#d1d5db",
+    }
 
     def __init__(self, *, model, session_path, history_messages):
         self.model = model
@@ -60,6 +49,10 @@ class InteractiveChatState:
         self._assistant_entry = None
         self._response_started_at = None
         self._restore_started_at = None
+        self.user_inputs = []
+        self._history_index = None
+        self._history_draft = ""
+        self.debug_event = None
         for message in history_messages:
             self.append_message(message.get("role"), message.get("content", ""))
 
@@ -67,17 +60,36 @@ class InteractiveChatState:
     def transcript_text(self):
         return "".join(self._entry_text(entry) for entry in self.transcript_entries)
 
-    def transcript_fragments(self):
-        fragments = []
+    def transcript_lines(self):
+        lines = []
         for entry in self.transcript_entries:
             label, role_style, message_style = self.ROLE_STYLES[entry["role"]]
-            fragments.append((role_style, label))
-            fragments.append((message_style, entry["text"]))
-            fragments.append(("", "\n"))
-        return fragments
+            text_lines = entry["text"].splitlines() or [""]
+            for index, text_line in enumerate(text_lines):
+                if index == 0:
+                    lines.append([(role_style, label), (message_style, text_line)])
+                else:
+                    lines.append([("", " " * len(label)), (message_style, text_line)])
+        return lines or [[("", "")]]
+
+    def transcript_rich_lines(self):
+        rich_lines = []
+        for fragments in self.transcript_lines():
+            line = Text()
+            for style_name, fragment in fragments:
+                line.append(fragment, style=self.RICH_STYLES.get(style_name, ""))
+            rich_lines.append(line)
+        return rich_lines
 
     def status_fragments(self):
         self._refresh_active_elapsed()
+        if self.debug_event:
+            return [
+                ("class:status.prefix", "·· "),
+                ("class:status.fail", "ev"),
+                ("", "  "),
+                ("class:status.time", self.debug_event),
+            ]
         symbol, label, token_style = self._status_token()
         return [
             ("class:status.prefix", "·· "),
@@ -87,6 +99,9 @@ class InteractiveChatState:
             ("", "  "),
             ("class:status.time", self.metric_value),
         ]
+
+    def status_text(self):
+        return "".join(part for _, part in self.status_fragments())
 
     def toolbar_fragments(self):
         return [
@@ -102,12 +117,17 @@ class InteractiveChatState:
             ("class:toolbar.sep", " ─"),
         ]
 
+    def toolbar_text(self):
+        return "".join(part for _, part in self.toolbar_fragments())
+
     def append_message(self, role, content):
         if role not in self.ROLE_STYLES:
             return
         text = self._normalize_content(content)
         if not text:
             return
+        if role == "user":
+            self.remember_user_input(text)
         self.transcript_entries.append({"role": role, "text": text})
 
     def begin_restore(self):
@@ -157,13 +177,40 @@ class InteractiveChatState:
         self._assistant_entry = None
         self._response_started_at = None
 
-    def complete_round(self, user_text, assistant_text):
-        self.append_message("user", user_text)
-        self.message_count += 1
-        self.begin_assistant_response()
-        self.write_assistant_chunk(assistant_text)
-        self.finish_assistant_response()
-        self.message_count += 1
+    def remember_user_input(self, text):
+        normalized = self._normalize_content(text)
+        if not normalized:
+            return
+        if not self.user_inputs or self.user_inputs[-1] != normalized:
+            self.user_inputs.append(normalized)
+        self.reset_input_replay()
+
+    def recall_previous_input(self, current_text):
+        if not self.user_inputs:
+            return current_text
+        if self._history_index is None:
+            self._history_draft = current_text
+            self._history_index = len(self.user_inputs) - 1
+        elif self._history_index > 0:
+            self._history_index -= 1
+        return self.user_inputs[self._history_index]
+
+    def recall_next_input(self, current_text):
+        if self._history_index is None:
+            return current_text
+        if self._history_index < len(self.user_inputs) - 1:
+            self._history_index += 1
+            return self.user_inputs[self._history_index]
+        draft = self._history_draft
+        self.reset_input_replay()
+        return draft
+
+    def reset_input_replay(self):
+        self._history_index = None
+        self._history_draft = ""
+
+    def record_debug_event(self, name):
+        self.debug_event = name
 
     def _refresh_active_elapsed(self):
         if self._response_started_at is not None:
@@ -192,75 +239,227 @@ class InteractiveChatState:
         return str(content).strip()
 
 
-def _create_application(state, *, on_submit):
+def _create_textual_app(
+    state,
+    *,
+    client,
+    model,
+    prompt,
+    session_path,
+    temperature,
+    max_output_tokens,
+    history_messages,
+    probe_input=False,
+):
     try:
-        from prompt_toolkit import Application
-        from prompt_toolkit.key_binding import KeyBindings
-        from prompt_toolkit.layout import HSplit, Layout, Window
-        from prompt_toolkit.layout.controls import FormattedTextControl
-        from prompt_toolkit.styles import Style
-        from prompt_toolkit.widgets import TextArea
+        from textual.app import App, ComposeResult
+        from textual.binding import Binding
+        from textual.containers import Vertical
+        from textual.widgets import Footer, Input, RichLog, Static
     except ImportError as exc:
-        raise click.ClickException("交互式对话需要安装 prompt_toolkit") from exc
+        raise click.ClickException("交互式对话需要安装 textual") from exc
 
-    output_area = TextArea(
-        text=state.transcript_text,
-        read_only=True,
-        scrollbar=True,
-        focusable=False,
-        wrap_lines=True,
-        lexer=_TranscriptLexer(),
-    )
-    status_line = Window(height=1, content=FormattedTextControl(state.status_fragments))
-    input_area = TextArea(
-        text="",
-        multiline=False,
-        wrap_lines=False,
-        prompt="你> ",
-    )
-    toolbar_line = Window(height=1, content=FormattedTextControl(state.toolbar_fragments))
-
-    def accept(buff):
-        text = buff.text.strip()
-        if not text:
-            buff.text = ""
-            return False
-        buff.text = ""
-        on_submit(text)
-        return False
-
-    input_area.buffer.accept_handler = accept
-
-    kb = KeyBindings()
-
-    @kb.add("c-c")
-    def _exit(event):
-        event.app.exit()
-
-    style = Style.from_dict(
-        {
-            "prompt": "#60a5fa",
-            "status.prefix": "#475569",
-            "status.time": "#94a3b8",
-            "status.idle": "#94a3b8",
-            "status.load": "#67e8f9",
-            "status.wait": "#22d3ee",
-            "status.fail": "#f87171",
-            "toolbar.label": "#64748b",
-            "toolbar.value": "#cbd5e1",
-            "toolbar.sep": "#334155",
-            "role.user": "#60a5fa bold",
-            "role.assistant": "#34d399 bold",
-            "role.system": "#fbbf24 bold",
-            "message.user": "",
-            "message.assistant": "",
-            "message.system": "#d1d5db",
+    class ChatApp(App[None]):
+        CSS = """
+        Screen {
+            layout: vertical;
         }
-    )
+        #transcript {
+            height: 1fr;
+            border: none;
+        }
+        #status {
+            height: 1;
+            color: rgb(148,163,184);
+            padding: 0 1;
+        }
+        #input {
+            height: 3;
+            min-height: 3;
+            max-height: 3;
+            margin: 0 1;
+            padding: 0 1;
+            border: round rgb(71,85,105);
+            background: transparent;
+        }
+        #input:focus {
+            border: round rgb(100,116,139);
+            background: transparent;
+        }
+        #toolbar {
+            height: 1;
+            color: rgb(148,163,184);
+            padding: 0 1;
+        }
+        Footer {
+            display: none;
+        }
+        """
 
-    root = HSplit([output_area, status_line, input_area, toolbar_line])
+        BINDINGS = [
+            Binding("up", "history_prev", show=False, priority=True),
+            Binding("down", "history_next", show=False, priority=True),
+            Binding("pageup", "history_page_up", show=False, priority=True),
+            Binding("pagedown", "history_page_down", show=False, priority=True),
+            Binding("home", "history_home", show=False, priority=True),
+            Binding("end", "history_end", show=False, priority=True),
+        ]
 
-    return Application(layout=Layout(root, focused_element=input_area), key_bindings=kb, full_screen=False, style=style), output_area
+        def compose(self) -> ComposeResult:
+            with Vertical():
+                yield RichLog(id="transcript", wrap=True, markup=False, highlight=False, auto_scroll=False)
+                yield Static(id="status")
+                yield Input(placeholder="", id="input")
+                yield Static(id="toolbar")
+                yield Footer()
+
+        def on_mount(self) -> None:
+            self.transcript = self.query_one("#transcript", RichLog)
+            self.status_widget = self.query_one("#status", Static)
+            self.input_widget = self.query_one("#input", Input)
+            self.toolbar_widget = self.query_one("#toolbar", Static)
+            self.transcript.can_focus = False
+            self.transcript.focus_on_click = False
+            self._busy = False
+            self._transcript_at_bottom = True
+            self._refresh_status()
+            self._reload_transcript()
+            self.set_interval(0.2, self._tick_status)
+            self.call_after_refresh(self._scroll_to_end)
+            self.call_after_refresh(self.input_widget.focus)
+            if prompt:
+                self.call_after_refresh(lambda: self._submit_text(prompt))
+
+        def _refresh_status(self) -> None:
+            self.status_widget.update(state.status_text())
+            self.toolbar_widget.update(state.toolbar_text())
+
+        def _reload_transcript(self) -> None:
+            self.transcript.clear()
+            for line in state.transcript_rich_lines():
+                self.transcript.write(line, scroll_end=False)
+            if self._transcript_at_bottom:
+                self._scroll_to_end()
+
+        def _scroll_to_end(self) -> None:
+            self.transcript.scroll_end(animate=False, immediate=True, force=True)
+            self._transcript_at_bottom = True
+
+        def _tick_status(self) -> None:
+            if self._busy:
+                self._refresh_status()
+
+        def _mark_user_scrolling(self) -> None:
+            self._transcript_at_bottom = False
+
+        async def on_input_submitted(self, message: Input.Submitted) -> None:
+            await self._submit_text(message.value)
+
+        async def _submit_text(self, text: str) -> None:
+            text = text.strip()
+            if not text or self._busy:
+                self.input_widget.value = ""
+                return
+            self.input_widget.value = ""
+            self._busy = True
+            state.append_message("user", text)
+            state.message_count += 1
+            state.begin_assistant_response()
+            self._transcript_at_bottom = True
+            self._reload_transcript()
+            self._refresh_status()
+            self.run_worker(self._run_round(text), exclusive=True)
+
+        async def _run_round(self, user_text: str) -> None:
+            assistant_parts = []
+
+            def handle_chunk(chunk: str) -> None:
+                assistant_parts.append(chunk)
+                state.write_assistant_chunk(chunk)
+                self.call_from_thread(self._on_transcript_update)
+
+            try:
+                result = await asyncio.to_thread(
+                    run_task,
+                    "chat",
+                    client,
+                    model,
+                    messages=[*history_messages, {"role": "user", "content": user_text}],
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                    stream_handler=handle_chunk,
+                )
+            except Exception as exc:
+                state.mark_error()
+                self._on_round_failed(str(exc))
+                return
+
+            if not assistant_parts and result["text"]:
+                state.write_assistant_chunk(result["text"])
+            state.finish_assistant_response()
+            state.message_count += 1
+            assistant_text = result["text"]
+            append_session_messages(session_path, [{"role": "user", "content": user_text}, {"role": "assistant", "content": assistant_text}])
+            history_messages.extend([{"role": "user", "content": user_text}, {"role": "assistant", "content": assistant_text}])
+            self._on_round_complete()
+
+        def _on_transcript_update(self) -> None:
+            self._reload_transcript()
+            self._refresh_status()
+
+        def _on_round_complete(self) -> None:
+            self._busy = False
+            self._reload_transcript()
+            self._refresh_status()
+
+        def _on_round_failed(self, error_text: str) -> None:
+            self._busy = False
+            state.append_message("system", error_text)
+            self._reload_transcript()
+            self._refresh_status()
+
+        def action_history_prev(self) -> None:
+            if probe_input:
+                state.record_debug_event("up")
+                self._refresh_status()
+            self.input_widget.value = state.recall_previous_input(self.input_widget.value)
+            self.input_widget.cursor_position = len(self.input_widget.value)
+
+        def action_history_next(self) -> None:
+            if probe_input:
+                state.record_debug_event("down")
+                self._refresh_status()
+            self.input_widget.value = state.recall_next_input(self.input_widget.value)
+            self.input_widget.cursor_position = len(self.input_widget.value)
+
+        def action_history_page_up(self) -> None:
+            if probe_input:
+                state.record_debug_event("pageup")
+                self._refresh_status()
+            self._mark_user_scrolling()
+            self.transcript.action_page_up()
+
+        def action_history_page_down(self) -> None:
+            if probe_input:
+                state.record_debug_event("pagedown")
+                self._refresh_status()
+            self._mark_user_scrolling()
+            self.transcript.action_page_down()
+
+        def action_history_home(self) -> None:
+            if probe_input:
+                state.record_debug_event("home")
+                self._refresh_status()
+            self._mark_user_scrolling()
+            self.transcript.action_scroll_home()
+
+        def action_history_end(self) -> None:
+            if probe_input:
+                state.record_debug_event("end")
+                self._refresh_status()
+            self._scroll_to_end()
+
+    return ChatApp()
 
 
 def run_interactive_chat(
@@ -272,85 +471,21 @@ def run_interactive_chat(
     temperature,
     max_output_tokens,
     history_messages,
+    probe_input=False,
 ):
     state = InteractiveChatState(model=model, session_path=session_path, history_messages=history_messages)
     if history_messages:
         state.begin_restore()
         state.finish_restore()
-    click.echo(f"会话: {session_path} | 已加载 {len(history_messages)} 条消息")
-
-    app_ref = {"busy": False}
-
-    def sync_output(output_area):
-        output_area.buffer.set_document(Document(text=state.transcript_text, cursor_position=len(state.transcript_text)), bypass_readonly=True)
-        app = app_ref.get("app")
-        if app is not None:
-            app.invalidate()
-
-    async def refresh_wait_status(output_area, interval=0.2):
-        try:
-            while app_ref["busy"] and state.status == "等待回复":
-                sync_output(output_area)
-                await asyncio.sleep(interval)
-        except asyncio.CancelledError:
-            raise
-
-    async def process_submission(user_text, output_area):
-        state.append_message("user", user_text)
-        state.message_count += 1
-        sync_output(output_area)
-
-        assistant_parts = []
-        state.begin_assistant_response()
-        sync_output(output_area)
-        refresh_task = app_ref["app"].create_background_task(refresh_wait_status(output_area))
-
-        def handle_chunk(chunk):
-            assistant_parts.append(chunk)
-            state.write_assistant_chunk(chunk)
-            sync_output(output_area)
-
-        try:
-            result = await asyncio.to_thread(
-                run_task,
-                "chat",
-                client,
-                model,
-                messages=[*history_messages, {"role": "user", "content": user_text}],
-                temperature=temperature,
-                max_output_tokens=max_output_tokens,
-                stream_handler=handle_chunk,
-            )
-        except Exception:
-            refresh_task.cancel()
-            state.mark_error()
-            sync_output(output_area)
-            app_ref["busy"] = False
-            raise
-
-        if not assistant_parts and result["text"]:
-            state.write_assistant_chunk(result["text"])
-        state.finish_assistant_response()
-        refresh_task.cancel()
-        state.message_count += 1
-        assistant_text = result["text"]
-        append_session_messages(session_path, [{"role": "user", "content": user_text}, {"role": "assistant", "content": assistant_text}])
-        history_messages.extend([{"role": "user", "content": user_text}, {"role": "assistant", "content": assistant_text}])
-        sync_output(output_area)
-        app_ref["busy"] = False
-
-    def submit(user_text, output_area):
-        if app_ref["busy"]:
-            return
-        app_ref["busy"] = True
-        app_ref["app"].create_background_task(process_submission(user_text, output_area))
-
-    app, output_area = _create_application(state, on_submit=lambda user_text: submit(user_text, output_area))
-    app_ref["app"] = app
-
-    def pre_run():
-        sync_output(output_area)
-        if prompt:
-            submit(prompt, output_area)
-
-    app.run(pre_run=pre_run)
+    app = _create_textual_app(
+        state,
+        client=client,
+        model=model,
+        prompt=prompt,
+        session_path=session_path,
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        history_messages=history_messages,
+        probe_input=probe_input,
+    )
+    app.run()
