@@ -81,6 +81,25 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(captured["reference"], ("first.jpg", "second.jpg"))
 
+    def test_image_command_passes_size_and_aspect_to_run_task(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-image-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["image_size"] = kwargs["image_size"]
+            captured["image_aspect_ratio"] = kwargs["image_aspect_ratio"]
+            return {"mode": mode, "output_paths": ["/tmp/result.jpg"], "printed": False}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["image", "测试", "--size", "2K", "--aspect", "16:9"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["image_size"], "2K")
+        self.assertEqual(captured["image_aspect_ratio"], "16:9")
+
     def test_image_command_rejects_removed_input_option(self):
         runner = CliRunner()
         result = runner.invoke(cli, ["image", "测试", "-i", "constraint-a.md"])
@@ -289,6 +308,71 @@ class ChatSessionTests(unittest.TestCase):
             api_module.set_debug(old_debug)
 
         self.assertIn('"stream": true', stderr.getvalue().lower())
+
+    def test_api_call_passes_image_config_through_extra_body(self):
+        from llm_cli.api import api_call
+
+        captured = {}
+        stream = [
+            SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="", refusal=None, role="assistant", images=None))]
+            )
+        ]
+
+        def fake_create(**kwargs):
+            captured.update(kwargs)
+            return stream
+
+        client = SimpleNamespace(
+            base_url="https://example.com/v1",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create)),
+        )
+
+        api_call(
+            client,
+            "test-model",
+            [{"role": "user", "content": "测试"}],
+            extra_body={
+                "modalities": ["image", "text"],
+                "image_config": {"image_size": "2K", "aspect_ratio": "16:9"},
+            },
+        )
+
+        self.assertEqual(captured["extra_body"]["modalities"], ["image", "text"])
+        self.assertEqual(captured["extra_body"]["image_config"]["image_size"], "2K")
+        self.assertEqual(captured["extra_body"]["image_config"]["aspect_ratio"], "16:9")
+
+    def test_batch_image_task_passes_size_and_aspect_to_run_task(self):
+        from llm_cli.batch import run_batch
+
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-image-model", {"BASE_URL": "https://example.com/v1"}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["image_size"] = kwargs["image_size"]
+            captured["image_aspect_ratio"] = kwargs["image_aspect_ratio"]
+            return {"mode": mode, "output_paths": ["/tmp/hero.jpg"], "printed": False}
+
+        yaml_content = """\
+mode: image
+tasks:
+  - id: hero-image
+    prompt: "生成横版海报"
+    size: 2K
+    aspect: "16:9"
+    output: hero.jpg
+"""
+
+        with TemporaryDirectory() as tmp:
+            yaml_path = Path(tmp) / "tasks.yaml"
+            yaml_path.write_text(yaml_content, encoding="utf-8")
+            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                run_batch(str(yaml_path))
+
+        self.assertEqual(captured["image_size"], "2K")
+        self.assertEqual(captured["image_aspect_ratio"], "16:9")
 
     def test_single_chat_with_session_loads_history_and_appends(self):
         with TemporaryDirectory() as tmp:

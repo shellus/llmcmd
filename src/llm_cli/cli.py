@@ -10,7 +10,7 @@ from .config import create_client
 from .interactive import run_interactive_chat
 from .session import append_session_messages, load_session_messages, replace_leading_system_messages, resolve_session_path, rewrite_session_messages
 from .task import run_task
-from .utils import fail, resolve_text
+from .utils import IMAGE_ASPECT_CHOICES, IMAGE_SIZE_CHOICES, fail, resolve_text
 
 
 def _now_iso():
@@ -216,6 +216,7 @@ def chat(prompt, reference, edit_path, session_name, system, interactive, output
   llm image @prompt.txt -r ref.jpg -r style.pdf -o result.jpg
   llm image "生成海报" -o poster.jpg
   llm image "生成三张海报方案" -n 3 -o poster.jpg
+  llm image "生成横版海报" --size 2K --aspect 16:9 -o poster.jpg
 """
 )
 @click.argument("prompt", metavar="PROMPT|@FILE")
@@ -223,16 +224,19 @@ def chat(prompt, reference, edit_path, session_name, system, interactive, output
 @click.option("-s", "--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
 @click.option("-o", "--output", default=None, help="输出路径")
 @click.option("-n", "--count", type=int, default=1, show_default=True, help="生成数量；会遵循 image 模式并发配置")
+@click.option("--size", "image_size", type=click.Choice(IMAGE_SIZE_CHOICES), default=None, help="图片分辨率档位：512 / 1K / 2K / 4K")
+@click.option("--aspect", "image_aspect_ratio", type=click.Choice(IMAGE_ASPECT_CHOICES), default=None, help="图片宽高比，例如 1:1 / 16:9 / 9:16")
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
-def image(prompt, reference, system, output, count, model, temperature, max_output_tokens):
+def image(prompt, reference, system, output, count, image_size, image_aspect_ratio, model, temperature, max_output_tokens):
     """图片生成或参考图编辑。
 
     PROMPT 为必填，支持直接传字面量，也支持使用 @文件路径 从文件读取。
     可选 -r 上传一个或多个附件，作为生成或编辑时的参考输入。
     通过 -n/--count 指定生成数量，单次多图会遵循 image 模式并发配置。
+    通过 --size / --aspect 指定分辨率档位与宽高比；会透传给兼容 Gemini 的后端。
     """
     if not prompt:
         fail("image 子命令需要 prompt")
@@ -251,6 +255,8 @@ def image(prompt, reference, system, output, count, model, temperature, max_outp
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         image_count=count,
+        image_size=image_size,
+        image_aspect_ratio=image_aspect_ratio,
         config=config,
         progress_callback=_image_progress if count > 1 else None,
     )

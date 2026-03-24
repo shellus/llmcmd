@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .config import create_client, get_config_value
 from .task import run_task
-from .utils import MODE_ALIASES, fail, resolve_path
+from .utils import IMAGE_ASPECT_CHOICES, IMAGE_SIZE_CHOICES, MODE_ALIASES, fail, resolve_path
 
 try:
     import yaml
@@ -51,6 +51,15 @@ def validate_task_fields(mode, task, index):
         count = task.get("count", 1)
         if not isinstance(count, int) or count <= 0:
             fail(f"第 {index} 个 image task 的 count 必须是大于 0 的整数")
+        image_size = task.get("image_size")
+        if image_size is not None and image_size not in IMAGE_SIZE_CHOICES:
+            fail(f"第 {index} 个 image task 的 size 必须是 {', '.join(IMAGE_SIZE_CHOICES)}，当前为: {image_size}")
+        image_aspect_ratio = task.get("image_aspect_ratio")
+        if image_aspect_ratio is not None and image_aspect_ratio not in IMAGE_ASPECT_CHOICES:
+            hint = "；YAML 中的宽高比请使用引号包裹，例如 \"16:9\"" if not isinstance(image_aspect_ratio, str) else ""
+            fail(
+                f"第 {index} 个 image task 的 aspect 必须是 {', '.join(IMAGE_ASPECT_CHOICES)}，当前为: {image_aspect_ratio}{hint}"
+            )
     elif mode == "audio":
         if not task.get("audio_file"):
             fail(f"第 {index} 个 audio task 缺少 audio_file")
@@ -180,6 +189,8 @@ def run_batch(yaml_path_str: str):
             "max_output_tokens": task.get("max_output_tokens", global_max_output_tokens),
             "model": task.get("model", global_model),
             "count": task.get("count", 1),
+            "image_size": task.get("size"),
+            "image_aspect_ratio": task.get("aspect"),
             "config": None,
         }
         validate_task_fields(mode, task_spec, index)
@@ -238,6 +249,8 @@ def run_batch(yaml_path_str: str):
             base_dir=yaml_dir,
             edit_path=task_spec["edit_path"],
             image_count=task_spec["count"],
+            image_size=task_spec["image_size"],
+            image_aspect_ratio=task_spec["image_aspect_ratio"],
             config=task_spec["config"],
             progress_callback=progress if task_spec["mode"] == "image" and task_spec["count"] > 1 else None,
         )

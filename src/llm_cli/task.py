@@ -27,6 +27,8 @@ def run_task(
     config=None,
     progress_callback=None,
     stream_handler=None,
+    image_size=None,
+    image_aspect_ratio=None,
 ):
     if messages is None:
         prompt_text = resolve_text(prompt, base_dir=base_dir)
@@ -68,6 +70,19 @@ def run_task(
             audio_path=audio_path,
         )
 
+    extra_body = None
+    if mode == "image":
+        image_config = {}
+        if image_size:
+            image_config["image_size"] = image_size
+        if image_aspect_ratio:
+            image_config["aspect_ratio"] = image_aspect_ratio
+        if image_config:
+            extra_body = {
+                "modalities": ["image", "text"],
+                "image_config": image_config,
+            }
+
     response = api_call(
         client,
         model,
@@ -75,6 +90,7 @@ def run_task(
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         stream_handler=stream_handler,
+        extra_body=extra_body,
     )
 
     if mode == "image":
@@ -96,6 +112,7 @@ def run_task(
                 messages,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
+                extra_body=extra_body,
             )
             return extract_image_result(image_response, output_path, image_index=index)
 

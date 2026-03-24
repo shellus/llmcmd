@@ -69,6 +69,7 @@ llm image "生成三张海报方案" -n 3 -o poster.jpg
 llm image "融合两张参考图的风格生成情侣自拍" -r person.jpg -r style.jpg -o couple.jpg
 llm image @prompt.md -r person.jpg -r constraints.pdf -o result.jpg
 llm image @prompts/couple-photo.md -r refs/person-a.jpg -r refs/person-b.jpg -o outputs/couple-photo/result.jpg -n 4
+llm image "生成横版海报" --size 2K --aspect 16:9 -o banner.jpg
 ```
 
 输出结果示例：
@@ -113,6 +114,8 @@ tasks:
     mode: image
     prompt: "为产品主页生成三张极简横幅图"
     count: 3
+    size: 2K
+    aspect: "16:9"
     output: hero.jpg
 
   - id: transcript
@@ -161,6 +164,14 @@ llm chat -I -s ./sessions/product-review.jsonl
 
 ### `llm image`
 用于图片生成或参考图编辑，支持 `-n/--count` 多图生成。`-r/--reference` 用于上传附件，当前统一走 `type=file`。
+
+补充说明：
+
+- `--size` 支持 `512 / 1K / 2K / 4K`
+- `--aspect` 支持 `1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9`
+- 这两个参数会继续通过 OpenAI 兼容的 `chat/completions` 入口发送，并附加到顶层 `image_config`
+- 若后端使用 `cliproxy` 之类的 Gemini 翻译层，会被转换成 Gemini `generationConfig.imageConfig`
+- batch YAML 中的 `aspect` 建议写成带引号的字符串，例如 `"16:9"`，避免 YAML 误解析
 
 ### `llm audio`
 用于把音频送入模型处理，位置参数是 prompt，`-r/--reference` 上传音频附件；默认实时输出到 stdout，仅在传 `-o` 时写文件。若要 SRT，请直接在 prompt 中明确要求。
@@ -217,6 +228,7 @@ OPENAI_IMAGE_CONCURRENCY=4
 - [x] 统一 `chat / image / audio / batch` 命令入口
 - [x] `chat --edit` 文本编辑工作流
 - [x] `image -n` 多图生成
+- [x] `image --size/--aspect` 分辨率档位与宽高比透传
 - [x] `chat -s/-I` JSONL 持久会话与交互式流式对话
 - [x] 会话内建管理命令：`/clear`、`/model`、`/save`
 - [ ] 持久会话扩展到多模态连续编辑场景

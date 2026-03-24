@@ -55,7 +55,7 @@ def sanitize_debug_value(value, *, limit=100):
     return cloned
 
 
-def api_call(client, model, messages, temperature=None, max_output_tokens=None, stream_handler=None):
+def api_call(client, model, messages, temperature=None, max_output_tokens=None, stream_handler=None, extra_body=None):
     kwargs = {
         "model": model,
         "messages": messages,
@@ -66,6 +66,8 @@ def api_call(client, model, messages, temperature=None, max_output_tokens=None, 
         kwargs["temperature"] = temperature
     if max_output_tokens is not None:
         kwargs["max_tokens"] = max_output_tokens
+    if extra_body:
+        kwargs["extra_body"] = extra_body
     kwargs["stream"] = True
 
     if DEBUG:

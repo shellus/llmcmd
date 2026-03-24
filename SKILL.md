@@ -75,6 +75,7 @@ llm image @prompt.txt -r ref.png -s @system.txt -o result.jpg
 llm image "融合两张参考图" -r ref-a.jpg -r ref-b.jpg -o result.jpg
 llm image @prompts/couple-photo.md -r refs/person-a.jpg -r refs/person-b.jpg -o outputs/couple-photo/result.jpg -n 4
 llm image "生成三张海报方案" -n 3 -o poster.jpg
+llm image "生成横版海报" --size 2K --aspect 16:9 -o poster.jpg
 ```
 
 规则：
@@ -84,6 +85,10 @@ llm image "生成三张海报方案" -n 3 -o poster.jpg
 - `-r/--reference` 为可选附件上传，可重复传入多个
 - 文本约束若要直接并入 prompt，请使用 `@文件`
 - `-n/--count` 用于控制生成数量，单命令多图会遵循 image 模式并发配置
+- `--size` 支持 `512 / 1K / 2K / 4K`
+- `--aspect` 支持 `1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9`
+- `--size/--aspect` 会继续通过 OpenAI 兼容 `chat/completions` 入口发送，并附加到顶层 `image_config`
+- batch YAML 中的 `aspect` 建议写成带引号的字符串，例如 `"16:9"`，避免 YAML 把它解析成其他类型
 - 多图模式会输出轻量进度：开始、每张完成、最终写入结果
 - `-o poster.jpg -n 3` 时会输出为 `poster.jpg`、`poster_1.jpg`、`poster_2.jpg`
 - 无 `-o` 时，默认输出到当前目录下的 `gemini-output/output_时间戳.jpg`
@@ -139,6 +144,8 @@ tasks:
     mode: image
     prompt: "为产品主页生成三张极简横幅图"
     count: 3
+    size: 2K
+    aspect: "16:9"
     output: hero.jpg
 
   - id: transcript
@@ -177,6 +184,8 @@ tasks:
 | `audio_file` | | audio | 覆盖顶层 `audio_file` |
 | `edit` | | chat | 目标文本文件，进入 diff 编辑模式 |
 | `count` | | image | 图片生成数量，遵循 image 模式并发配置 |
+| `size` | | image | 图片分辨率档位：`512 / 1K / 2K / 4K` |
+| `aspect` | | image | 图片宽高比：`1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9` |
 | `output` | | 全部 | 输出路径，未指定时使用默认规则 |
 | `temperature` | | 全部 | 覆盖顶层 `temperature` |
 | `max_output_tokens` | | 全部 | 覆盖顶层 `max_output_tokens` |

@@ -14,7 +14,7 @@
 | `src/llm_cli/config.py` | 读取 `~/.config/llm-api/.env`，解析模型与并发配置，创建 OpenAI 客户端 |
 | `src/llm_cli/task.py` | 统一任务执行入口，负责把参数转成消息、调用上游、整理输出 |
 | `src/llm_cli/messages.py` | 按 `chat / image / audio / chat_edit` 构造消息体 |
-| `src/llm_cli/api.py` | 统一调用 `chat.completions.create(stream=True)`，收集文本与图片等流式结果 |
+| `src/llm_cli/api.py` | 统一调用 `chat.completions.create(stream=True)`，必要时通过 `extra_body` 透传兼容扩展字段，收集文本与图片等流式结果 |
 | `src/llm_cli/output.py` | 提取文本/图片结果，处理默认输出路径与 edit diff 应用 |
 | `src/llm_cli/batch.py` | 解析 YAML，准备任务规格，并发执行批处理 |
 | `src/llm_cli/session.py` | `chat -s/-I` 的 JSONL 会话持久化 |
@@ -35,6 +35,36 @@ Click 子命令
   -> extract_text_result() / extract_image_result()
   -> 写文件或输出终端
 ```
+
+### `image --size/--aspect`
+
+图片模式继续复用统一的 OpenAI 兼容 `chat/completions` 调用链，不为 Gemini 单独分叉一套 SDK 或请求格式。
+
+这样设计的原因：
+
+- 保持 `chat / image / audio` 三种模式共享同一套 `BASE_URL`、鉴权和流式响应处理
+- 复用 `cliproxy` 已有的 OpenAI → Gemini 转换逻辑，避免在本项目维护一套 Gemini 专有协议分支
+- 让尺寸与宽高比控制保持为请求级元数据，而不是塞进 prompt 里做弱约束
+
+当前实现中，`image` 模式会在原有 OpenAI 请求顶层追加：
+
+```json
+{
+  "modalities": ["image", "text"],
+  "image_config": {
+    "image_size": "2K",
+    "aspect_ratio": "16:9"
+  }
+}
+```
+
+当后端为 `cliproxy` 时，这些字段会被翻译为 Gemini：
+
+- `modalities` → `generationConfig.responseModalities`
+- `image_config.image_size` → `generationConfig.imageConfig.imageSize`
+- `image_config.aspect_ratio` → `generationConfig.imageConfig.aspectRatio`
+
+因此，CLI 层保持 OpenAI 兼容入口，后端负责 Gemini 协议适配；本项目不直接构造 Gemini `generateContent` 请求。
 
 ### `chat --edit`
 
@@ -114,6 +144,11 @@ session.py 读取 JSONL
 
 新增输入能力时，优先扩展 `build_messages()`，不要在 `cli.py` 或 `task.py` 拼接临时消息结构。
 
+例外规则：
+
+- 若参数本质上属于请求顶层控制字段，而不是消息内容本身，例如 `modalities`、`image_config`，应放在 `task.py/api.py` 通过 `extra_body` 透传
+- 不要把尺寸、宽高比之类协议级能力伪装进 prompt 或 system 文本
+
 ## 输出处理约束
 
 `output.py` 负责处理两类高风险逻辑：
@@ -128,6 +163,7 @@ session.py 读取 JSONL
 - `chat/completions` 路径下不要假设文档附件的 `file_data` 兼容可用；文本类参考输入应优先转成内联文本
 - 如果上游返回 Markdown 图片链接，则回退到正则提取并下载
 - `chat / image / audio` 请求统一走 `stream=True`
+- `image` 模式如需控制分辨率或宽高比，优先使用顶层 `image_config` 透传给兼容后端
 - 非交互 `chat / audio` 必须把流式文本实时写到 stdout，不允许等完整响应后一次性输出
 - edit 模式必须保持“唯一定位 + 最小修改”，不能放宽 SEARCH 匹配规则
 
