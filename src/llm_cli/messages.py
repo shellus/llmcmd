@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .files import load_binary_attachment
+from .files import is_image_attachment, is_text_attachment, load_binary_attachment, read_text_attachment
 from .utils import fail, join_message_parts
 
 DEFAULT_EDIT_PROMPT = """你是一个严谨的文本编辑助手。你会收到一份原始文件内容，以及用户的修改要求。
@@ -19,6 +19,36 @@ DEFAULT_EDIT_PROMPT = """你是一个严谨的文本编辑助手。你会收到�
 - 可以输出多个修改块；若只需一处修改，只输出一个修改块
 - 必须给出至少一个实际修改；不要输出空响应，也不要输出与原文完全相同的替换
 """
+
+
+def _build_file_part(path):
+    attachment = load_binary_attachment(path)
+    return {
+        "type": "file",
+        "file": {
+            "filename": Path(attachment["path"]).name,
+            "file_data": attachment["base64_data"],
+        },
+    }
+
+
+def _build_image_url_part(path):
+    attachment = load_binary_attachment(path, "image")
+    return {
+        "type": "image_url",
+        "image_url": {
+            "url": f"data:{attachment['mime_type']};base64,{attachment['base64_data']}"
+        },
+    }
+
+
+def _build_text_attachment_part(path):
+    attachment = read_text_attachment(path)
+    filename = Path(attachment["path"]).name
+    language = attachment["language"]
+    content = attachment["content"]
+    body = f"[文件: {filename}]\n```{language}\n{content}\n```" if content else f"[文件: {filename}]"
+    return {"type": "text", "text": body}
 
 
 def build_messages(mode, prompt, system_prompt=None, input_text=None, reference_path=None, audio_path=None):
@@ -43,15 +73,12 @@ def build_messages(mode, prompt, system_prompt=None, input_text=None, reference_
         ]
         content = [{"type": "text", "text": join_message_parts(*user_parts)}]
         for path in reference_paths:
-            attachment = load_binary_attachment(path, "image")
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{attachment['mime_type']};base64,{attachment['base64_data']}"
-                    },
-                }
-            )
+            if is_image_attachment(path):
+                content.append(_build_image_url_part(path))
+            elif is_text_attachment(path):
+                content.append(_build_text_attachment_part(path))
+            else:
+                fail(f"chat edit 模式暂不支持该附件类型: {path}")
         messages.append({"role": "user", "content": content})
         return messages
 
@@ -64,15 +91,12 @@ def build_messages(mode, prompt, system_prompt=None, input_text=None, reference_
             if message_text:
                 content.append({"type": "text", "text": message_text})
             for path in reference_paths:
-                attachment = load_binary_attachment(path, "image")
-                content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{attachment['mime_type']};base64,{attachment['base64_data']}"
-                        },
-                    }
-                )
+                if is_image_attachment(path):
+                    content.append(_build_image_url_part(path))
+                elif is_text_attachment(path):
+                    content.append(_build_text_attachment_part(path))
+                else:
+                    fail(f"chat 模式暂不支持该附件类型: {path}")
             messages.append({"role": "user", "content": content})
         else:
             messages.append({"role": "user", "content": message_text})
@@ -84,15 +108,7 @@ def build_messages(mode, prompt, system_prompt=None, input_text=None, reference_
         if reference_paths:
             content = []
             for path in reference_paths:
-                attachment = load_binary_attachment(path, "image")
-                content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{attachment['mime_type']};base64,{attachment['base64_data']}"
-                        },
-                    }
-                )
+                content.append(_build_file_part(path))
             content.append({"type": "text", "text": message_text})
             messages.append({"role": "user", "content": content})
         else:

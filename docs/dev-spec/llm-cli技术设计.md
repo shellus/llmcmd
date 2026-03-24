@@ -18,7 +18,7 @@
 | `src/llm_cli/output.py` | 提取文本/图片结果，处理默认输出路径与 edit diff 应用 |
 | `src/llm_cli/batch.py` | 解析 YAML，准备任务规格，并发执行批处理 |
 | `src/llm_cli/session.py` | `chat -s/-I` 的 JSONL 会话持久化 |
-| `src/llm_cli/files.py` | 读取图片/音频附件并转为 base64 |
+| `src/llm_cli/files.py` | 读取任意附件并转为 base64，负责 MIME 识别 |
 | `src/llm_cli/utils.py` | 路径解析、文本读取、通用错误退出 |
 
 ## 主调用链
@@ -51,7 +51,7 @@ chat --edit
 
 ### `chat -s/-I`
 
-会话模式仅支持纯文本对话，不与 `-i/-r/--edit` 混用；`--system` 可以参与会话历史管理。
+会话模式仅支持纯文本对话，不与 `-r/--edit` 混用；`--system` 可以参与会话历史管理。
 
 ```text
 session.py 读取 JSONL
@@ -106,10 +106,11 @@ session.py 读取 JSONL
 
 当前约束如下：
 
-- `chat` 支持文本 + 多张参考图
-- `chat_edit` 支持文本文件内容 + 修改要求 + 可选参考图
-- `image` 支持主 prompt + 多张参考图 + 补充文本约束
-- `audio` 通过 `file` 类型上传音频，避免依赖不稳定的 `input_audio`
+- `@文件` 用于把 UTF-8 文本直接读入 prompt / system 文本
+- `chat / image / audio` 的 `-r/--reference` 统一表示参考输入
+- `chat` 中图片附件构造成 `image_url`，文本附件先读取后构造成 `text`
+- `image / audio` 继续使用文件型附件输入
+- `chat_edit` 支持文本文件内容 + 修改要求 + 可选附件
 
 新增输入能力时，优先扩展 `build_messages()`，不要在 `cli.py` 或 `task.py` 拼接临时消息结构。
 
@@ -124,6 +125,7 @@ session.py 读取 JSONL
 
 - 图片结果优先读取 `message.images`
 - `chat` 模式若检测到图片响应，也按图片结果落盘并返回路径，不再把 base64 当文本输出
+- `chat/completions` 路径下不要假设文档附件的 `file_data` 兼容可用；文本类参考输入应优先转成内联文本
 - 如果上游返回 Markdown 图片链接，则回退到正则提取并下载
 - `chat / image / audio` 请求统一走 `stream=True`
 - 非交互 `chat / audio` 必须把流式文本实时写到 stdout，不允许等完整响应后一次性输出

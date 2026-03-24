@@ -29,7 +29,7 @@ description: Use when text generation, image generation or editing, audio transc
 ```bash
 llm chat "写一段产品介绍"
 llm chat @prompt.txt -o result.md
-llm chat "总结重点" -i article.md -i notes.md
+llm chat "总结重点" -r article.md -r notes.pdf
 llm chat "整理为 JSON" --system @system.txt
 llm chat "继续补充这个方案" -s demo
 llm chat -I -s demo
@@ -43,8 +43,9 @@ llm chat "按要求改写" --edit 商务女性生图.md -o 商务女性生图.v2
 
 - `prompt` 支持字面量或 `@文件`
 - `--system` 支持字面量或 `@文件`
-- `-i/--input` 可重复传入多个文本文件，作为补充上下文
-- `-r/--reference` 可重复传入多张图片，用于视觉理解或图片分析
+- `-r/--reference` 可重复传入多个附件
+- 图片附件会作为多模态图片输入发送；文本附件会先读取内容，再以内联文本形式发送
+- 文本文件若要直接作为主 prompt，请使用 `@文件`
 - `-s/--session` 用于加载并持久化 JSONL 对话历史，可传会话名或文件路径
 - `-I/--interactive` 进入交互式连续对话；默认仅保存在内存中，配合 `-s` 才会加载并持久化
 - `llm chat -I "首轮问题"` 会先发送这条首轮消息，再进入连续对话
@@ -58,7 +59,7 @@ llm chat "按要求改写" --edit 商务女性生图.md -o 商务女性生图.v2
 - `--edit` 模式下，模型必须输出 `SEARCH/REPLACE` diff blocks，CLI 自动应用 diff
 - `--edit` 不带 `-o` 时直接覆盖原文件；带 `-o` 时输出到新文件
 - 非 edit 模式下，有 `-o` 时写入文件；无 `-o` 时输出到终端
-- 当前持久会话模式先专注文本连续对话，不与 `-i/-r/--edit` 组合
+- 当前持久会话模式先专注文本连续对话，不与 `-r/--edit` 组合
 - `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只会覆盖会话开头连续的 system 消息，其余历史保留
 - `chat` / `image` / `audio` 当前统一通过流式请求收集结果
 - 非交互 `chat` 与 `audio` 会实时把流式文本写到 stdout
@@ -71,18 +72,17 @@ llm image "画一只猫"
 llm image @prompt.txt -o cat.jpg
 llm image "保留主体，改成极简插画风格" -r photo.jpg
 llm image @prompt.txt -r ref.png -s @system.txt -o result.jpg
-llm image @prompt.txt -i constraints.md -r ref.png -o result.jpg
 llm image "融合两张参考图" -r ref-a.jpg -r ref-b.jpg -o result.jpg
-llm image @prompts/couple-photo.md -i prompts/keep-outfit-and-accessories.md -r refs/person-a.jpg -r refs/person-b.jpg -o outputs/couple-photo/result.jpg -n 4
+llm image @prompts/couple-photo.md -r refs/person-a.jpg -r refs/person-b.jpg -o outputs/couple-photo/result.jpg -n 4
 llm image "生成三张海报方案" -n 3 -o poster.jpg
 ```
 
 规则：
 
 - `prompt` 支持字面量或 `@文件`
-- `-i/--input` 可重复传入多个文本文件，作为补充约束
 - `-s/--system` 支持字面量或 `@文件`
-- `-r/--reference` 为可选参考图，可重复传入多张
+- `-r/--reference` 为可选附件上传，可重复传入多个
+- 文本约束若要直接并入 prompt，请使用 `@文件`
 - `-n/--count` 用于控制生成数量，单命令多图会遵循 image 模式并发配置
 - 多图模式会输出轻量进度：开始、每张完成、最终写入结果
 - `-o poster.jpg -n 3` 时会输出为 `poster.jpg`、`poster_1.jpg`、`poster_2.jpg`
@@ -229,9 +229,9 @@ OPENAI_IMAGE_CONCURRENCY=4
 | 问题 | 原因 | 正确方式 |
 |------|------|----------|
 | 把 YAML 文件直接传给 `chat` | `chat` 只处理单次任务 | 使用 `batch tasks.yaml` |
-| audio 命令把文本写成第二个位置参数 | audio 只接受音频文件位置参数 | 用 `-p "你的要求"` |
+| audio 命令没传 `-r` | audio 的音频文件必须通过 `-r` 提供 | 使用 `llm audio "你的要求" -r demo.m4a` |
 | image/chat 想从文件读取 prompt 但直接写路径 | 未使用 `@` 前缀 | 用 `@prompt.txt` |
-| 想编辑文本文件却传给 `-r` | `-r` 仅支持图片参考 | 用 `--edit file.md` |
+| 想编辑文本文件却传给 `-r` | `-r` 是参考输入，不会修改文件 | 用 `--edit file.md` |
 | batch 中 audio 任务写成 `audio` 字段 | 字段名不对 | 使用 `audio_file` |
 
 ## --debug
@@ -250,4 +250,4 @@ llm chat "test" --debug
 |------|--------------|
 | chat | 打印到终端 |
 | image | `./gemini-output/output_时间戳.jpg` |
-| audio | 输入音频同目录同名 `.srt` |
+| audio | 打印到终端 |

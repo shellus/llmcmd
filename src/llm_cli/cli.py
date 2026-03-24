@@ -66,7 +66,6 @@ def _run_chat_once(
     resolved_model,
     *,
     prompt,
-    input_files,
     reference,
     edit_path,
     system,
@@ -76,13 +75,12 @@ def _run_chat_once(
     session_path=None,
 ):
     history_messages = load_session_messages(session_path) if session_path else []
-    if history_messages and (input_files or reference or edit_path):
-        fail("持久会话模式暂不支持与 --system/-i/-r/--edit 组合使用")
+    if history_messages and (reference or edit_path):
+        fail("持久会话模式暂不支持与 --system/-r/--edit 组合使用")
 
     task_kwargs = {
         "prompt": prompt,
         "system_prompt": system,
-        "input_paths": input_files,
         "reference": reference,
         "output": output,
         "temperature": temperature,
@@ -96,8 +94,6 @@ def _run_chat_once(
             fail("持久会话模式暂不支持 --edit")
         if reference:
             fail("持久会话模式暂不支持 -r/--reference")
-        if input_files:
-            fail("持久会话模式暂不支持 -i/--input")
         history_messages = replace_leading_system_messages(history_messages, resolve_text(system) if system else None)
         if system:
             rewrite_session_messages(session_path, history_messages)
@@ -152,15 +148,14 @@ def cli():
 使用示例:
   llm chat "写一段产品介绍"
   llm chat @prompt.txt -o result.md
-  llm chat "总结重点" -i article.md -i notes.md
+  llm chat "总结重点" -r article.pdf -r notes.txt
   llm chat "详细描述这张图" -r photo.jpg
   llm chat "把人物脸型改成偏瘦" --edit prompt.md
   llm chat "按要求改写" --edit prompt.md -o prompt.v2.md
 """
 )
 @click.argument("prompt", required=False, default=None, metavar="[PROMPT|@FILE]")
-@click.option("-i", "--input", "input_files", multiple=True, help="补充上下文文本文件，可重复传入多个")
-@click.option("-r", "--reference", multiple=True, help="参考图片路径（仅图片），用于视觉理解，可重复传入")
+@click.option("-r", "--reference", multiple=True, help="上传附件，可重复传入多个")
 @click.option("--edit", "edit_path", default=None, help="编辑目标文本文件；模型将输出 diff 并自动应用")
 @click.option("-s", "--session", "session_name", default=None, help="加载/持久化对话历史；可传会话名或 JSONL 路径")
 @click.option("--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
@@ -171,11 +166,11 @@ def cli():
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--probe-input", is_flag=True, hidden=True, help="调试交互式输入事件")
 @click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
-def chat(prompt, input_files, reference, edit_path, session_name, system, interactive, output, model, temperature, max_output_tokens, probe_input):
+def chat(prompt, reference, edit_path, session_name, system, interactive, output, model, temperature, max_output_tokens, probe_input):
     """对话/文本生成。
 
     PROMPT 支持直接传字面量，也支持使用 @文件路径 从文件读取。
-    可配合 -i 补充文本文件上下文，配合 -r 传入图片进行视觉理解。
+    可配合 -r 上传附件与模型对话；文本文件若要直接并入 prompt，请使用 @文件路径。
     指定 --edit 时进入文件编辑模式：模型输出 diff，CLI 自动应用；不传 -o 时直接覆盖原文件。
     """
     if edit_path and not prompt:
@@ -202,7 +197,6 @@ def chat(prompt, input_files, reference, edit_path, session_name, system, intera
         client,
         resolved_model,
         prompt=prompt,
-        input_files=input_files,
         reference=reference,
         edit_path=edit_path,
         system=system,
@@ -219,14 +213,13 @@ def chat(prompt, input_files, reference, edit_path, session_name, system, intera
 使用示例:
   llm image "画一只赛博朋克风格的猫"
   llm image "把这张图变成水彩风" -r ref.jpg
-  llm image @prompt.txt -i constraints.md -r ref.jpg -o result.jpg
+  llm image @prompt.txt -r ref.jpg -r style.pdf -o result.jpg
   llm image "生成海报" -o poster.jpg
   llm image "生成三张海报方案" -n 3 -o poster.jpg
 """
 )
 @click.argument("prompt", metavar="PROMPT|@FILE")
-@click.option("-i", "--input", "input_files", multiple=True, help="补充上下文文本文件，可重复传入多个")
-@click.option("-r", "--reference", multiple=True, help="参考图片路径（仅图片），可重复传入")
+@click.option("-r", "--reference", multiple=True, help="上传附件，可重复传入多个")
 @click.option("-s", "--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
 @click.option("-o", "--output", default=None, help="输出路径")
 @click.option("-n", "--count", type=int, default=1, show_default=True, help="生成数量；会遵循 image 模式并发配置")
@@ -234,11 +227,11 @@ def chat(prompt, input_files, reference, edit_path, session_name, system, intera
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
-def image(prompt, input_files, reference, system, output, count, model, temperature, max_output_tokens):
+def image(prompt, reference, system, output, count, model, temperature, max_output_tokens):
     """图片生成或参考图编辑。
 
     PROMPT 为必填，支持直接传字面量，也支持使用 @文件路径 从文件读取。
-    可选 -i 传入补充文本约束文件，可选 -r 传入参考图（仅图片），进行参考图编辑或风格迁移。
+    可选 -r 上传一个或多个附件，作为生成或编辑时的参考输入。
     通过 -n/--count 指定生成数量，单次多图会遵循 image 模式并发配置。
     """
     if not prompt:
@@ -253,7 +246,6 @@ def image(prompt, input_files, reference, system, output, count, model, temperat
         resolved_model,
         prompt=prompt,
         system_prompt=system,
-        input_paths=input_files,
         reference=reference,
         output=output,
         temperature=temperature,

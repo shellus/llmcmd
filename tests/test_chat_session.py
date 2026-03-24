@@ -81,22 +81,32 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(captured["reference"], ("first.jpg", "second.jpg"))
 
-    def test_image_command_passes_input_files_to_run_task(self):
+    def test_image_command_rejects_removed_input_option(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["image", "测试", "-i", "constraint-a.md"])
+        self.assertNotEqual(result.exit_code, 0)
+
+    def test_chat_command_passes_all_references_to_run_task(self):
         captured = {}
 
         def fake_create_client(mode, explicit_model=None):
-            return object(), "test-image-model", {}
+            return object(), "test-model", {}
 
         def fake_run_task(mode, client, model, **kwargs):
-            captured["input_paths"] = kwargs["input_paths"]
-            return {"mode": mode, "output_paths": ["/tmp/result.jpg"], "printed": False}
+            captured["reference"] = kwargs["reference"]
+            return {"mode": mode, "text": "回答", "printed": True}
 
         runner = CliRunner()
         with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
-            result = runner.invoke(cli, ["image", "测试", "-i", "constraint-a.md", "-i", "constraint-b.md"])
+            result = runner.invoke(cli, ["chat", "分析附件", "-r", "a.txt", "-r", "b.png"])
 
         self.assertEqual(result.exit_code, 0)
-        self.assertEqual(captured["input_paths"], ("constraint-a.md", "constraint-b.md"))
+        self.assertEqual(captured["reference"], ("a.txt", "b.png"))
+
+    def test_chat_command_rejects_removed_input_option(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["chat", "分析", "-i", "note.txt"])
+        self.assertNotEqual(result.exit_code, 0)
 
     def test_chat_command_renders_output_paths_when_chat_model_returns_image(self):
         def fake_create_client(mode, explicit_model=None):
@@ -205,6 +215,47 @@ class ChatSessionTests(unittest.TestCase):
         runner = CliRunner()
         result = runner.invoke(cli, ["audio", "总结录音内容"])
         self.assertNotEqual(result.exit_code, 0)
+
+    def test_build_messages_chat_inlines_text_and_keeps_image_url_references(self):
+        from llm_cli.messages import build_messages
+
+        with patch("llm_cli.messages.load_binary_attachment") as mock_load, patch(
+            "llm_cli.messages.read_text_attachment"
+        ) as mock_text:
+            mock_text.return_value = {"path": "/tmp/a.txt", "content": "文本附件内容", "language": "txt"}
+            mock_load.return_value = {"path": "/tmp/b.png", "mime_type": "image/png", "base64_data": "Qg=="}
+            messages = build_messages("chat", prompt="分析这些附件", reference_path=["/tmp/a.txt", "/tmp/b.png"])
+
+        self.assertEqual(len(messages), 1)
+        content = messages[0]["content"]
+        self.assertEqual(content[0], {"type": "text", "text": "分析这些附件"})
+        self.assertEqual(content[1]["type"], "text")
+        self.assertIn("[文件: a.txt]", content[1]["text"])
+        self.assertIn("```txt", content[1]["text"])
+        self.assertIn("文本附件内容", content[1]["text"])
+        self.assertEqual(content[2]["type"], "image_url")
+        self.assertEqual(content[2]["image_url"]["url"], "data:image/png;base64,Qg==")
+
+    def test_build_messages_chat_rejects_unsupported_binary_reference(self):
+        from llm_cli.messages import build_messages
+
+        with patch("llm_cli.messages.is_text_attachment", return_value=False), patch(
+            "llm_cli.messages.is_image_attachment", return_value=False
+        ):
+            with self.assertRaises(SystemExit):
+                build_messages("chat", prompt="分析附件", reference_path=["/tmp/demo.bin"])
+
+    def test_build_messages_image_uses_file_parts_for_references(self):
+        from llm_cli.messages import build_messages
+
+        with patch("llm_cli.messages.load_binary_attachment") as mock_load:
+            mock_load.return_value = {"path": "/tmp/ref.png", "mime_type": "image/png", "base64_data": "QQ=="}
+            messages = build_messages("image", prompt="保留主体重绘", reference_path=["/tmp/ref.png"])
+
+        content = messages[0]["content"]
+        self.assertEqual(content[0]["type"], "file")
+        self.assertEqual(content[0]["file"]["filename"], "ref.png")
+        self.assertEqual(content[1], {"type": "text", "text": "保留主体重绘"})
 
     def test_debug_logs_include_stream_true(self):
         from llm_cli import api as api_module
@@ -871,9 +922,11 @@ class ChatSessionTests(unittest.TestCase):
 
         self.assertEqual(len(messages), 1)
         content = messages[0]["content"]
-        image_parts = [part for part in content if part["type"] == "image_url"]
+        file_parts = [part for part in content if part["type"] == "file"]
         text_parts = [part for part in content if part["type"] == "text"]
-        self.assertEqual(len(image_parts), 2)
+        self.assertEqual(len(file_parts), 2)
+        self.assertEqual(file_parts[0]["file"]["filename"], "first.jpg")
+        self.assertEqual(file_parts[1]["file"]["filename"], "second.jpg")
         self.assertEqual(text_parts, [{"type": "text", "text": "测试提示词"}])
 
     def test_build_messages_merges_image_prompt_and_input_text(self):
