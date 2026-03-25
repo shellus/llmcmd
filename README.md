@@ -152,14 +152,13 @@ llm chat -I -s ./sessions/product-review.jsonl
 - `-I` 模式下只有配合 `-s` 才会回放历史消息并持续写回；不带 `-s` 时为纯内存会话
 - `-I` 基于 `Textual` 全屏 TUI 提供消息区、输入区、输入框上方常驻交互状态行和底部元信息栏
 - 交互输入区支持多行粘贴与手动换行；`Enter` 发送，`Shift+Enter` 或 `Ctrl+J` 换行
-- 历史消息中的 `你 / AI / 系统` 角色标签会独立着色，便于快速分辨轮次边界
+- 历史消息中的 `你 / AI / 系统` 角色标签会独立着色，便于快速分辨不同轮次
 - 当前持久会话先聚焦连续文本对话，不与 `-r/--edit` 组合
 - `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只会覆盖会话开头连续的 system 消息，其余历史保留
 - 交互式内置命令：`/clear` 清空当前会话，`/model <name>` 切换当前模型并写回 `CHAT_MODEL`，`/save <name-or-path>` 将当前会话保存到指定文件
 - 如需使用终端原生鼠标拖选复制历史消息，请按住终端模拟器的修饰键；当前环境实测为按住 `Shift` 再拖选
 - `chat` / `image` / `audio` 当前统一通过流式请求收集结果
 - 非交互 `chat` 与 `audio` 会实时把流式文本写到 stdout
-- `chat` 中图片附件按 `image_url` 发送；文本附件会以内联文本方式发送，避免依赖不稳定的 `file_data` 兼容实现
 - 若 `chat` 使用图片模型并返回图片，会自动落盘并显示图片路径
 
 ### `llm image`
@@ -169,8 +168,7 @@ llm chat -I -s ./sessions/product-review.jsonl
 
 - `--size` 支持 `512 / 1K / 2K / 4K`
 - `--aspect` 支持 `1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9`
-- 这两个参数会继续通过 OpenAI 兼容的 `chat/completions` 入口发送，并附加到顶层 `image_config`
-- 若后端使用 `cliproxy` 之类的 Gemini 翻译层，会被转换成 Gemini `generationConfig.imageConfig`
+- `--size` 和 `--aspect` 的实际生效情况取决于你所使用的图片后端
 - batch YAML 中的 `aspect` 建议写成带引号的字符串，例如 `"16:9"`，避免 YAML 误解析
 
 ### `llm audio`
@@ -211,7 +209,7 @@ OPENAI_CHAT_CONCURRENCY=4
 OPENAI_IMAGE_CONCURRENCY=4
 ```
 
-模型优先级：
+模型选择顺序：
 
 - `chat`：`CHAT_MODEL` → `MODEL`
 - `image`：`IMAGE_MODEL` → `MODEL`
@@ -223,20 +221,7 @@ OPENAI_IMAGE_CONCURRENCY=4
 - CLI 命令名：`llm`
 - Python 要求：`>=3.10`
 
-## 项目进度
+## 相关文档
 
-- [x] 统一 `chat / image / audio / batch` 命令入口
-- [x] `chat --edit` 文本编辑工作流
-- [x] `image -n` 多图生成
-- [x] `image --size/--aspect` 分辨率档位与宽高比透传
-- [x] `chat -s/-I` JSONL 持久会话与交互式流式对话
-- [x] 会话内建管理命令：`/clear`、`/model`、`/save`
-- [ ] 持久会话扩展到多模态连续编辑场景
-
-## 详细文档
-
-更完整的参数说明、YAML 字段说明和行为规则，请查看 [SKILL.md](./SKILL.md)。
-
-开发维护时可参考：
-
-- [llm CLI 技术设计](./docs/dev-spec/llm-cli技术设计.md)
+- AI Agent 入口文档：[SKILL.md](./SKILL.md)
+- 开发参考：[DEVELOPING.md](./DEVELOPING.md)

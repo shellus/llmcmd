@@ -5,258 +5,41 @@ description: Use when text generation, image generation or editing, audio transc
 
 # llm skill
 
-统一的 `llm` 命令行入口，用于：
+这个 skill 对应项目里的统一命令行入口 `llm`。
 
-- 文本生成、改写、总结、提取、翻译
-- 图片生成、参考图编辑、多图生成
-- 音频转录、字幕输出
-- YAML 批量任务编排
-- 按用户要求直接编辑文本文件
+适用场景：
 
-## 适用场景
+- 生成一段文本、润色文案、总结资料
+- 根据参考图生成或修改图片
+- 转录音频或生成字幕
+- 用 YAML 批量执行 `chat / image / audio`
+- 按要求直接编辑文本文件
 
-当用户希望在终端里完成以下事情时，优先使用这个 skill：
+## Agent 使用方式
 
-- 生成一段文本、润色一份文案、总结多份资料
-- 根据一张图来分析内容，或据此改写提示词
-- 生成一张或多张图片
-- 把音频转成文本或 SRT 字幕
-- 用一个 YAML 文件批量执行多条任务
-- 直接按要求修改某个文本文件
+如果你是 AI Agent：
 
-## chat
+1. 先阅读 [`README.md`](./README.md)
+2. 按 README 中的完整命令说明、参数、边界和示例执行
+3. 不要把本文件当成完整手册
+
+如果需要远程安装或读取本项目 skill，可直接使用：
+
+```text
+https://github.com/shellus/llmcmd/raw/refs/heads/master/SKILL.md
+```
+
+## 最常用命令
 
 ```bash
 llm chat "写一段产品介绍"
-llm chat @prompt.txt -o result.md
-llm chat "总结重点" -r article.md -r notes.pdf
-llm chat "整理为 JSON" --system @system.txt
-llm chat "继续补充这个方案" -s demo
-llm chat -I -s demo
-llm chat -I "你是什么模型？"
-llm chat "详细描述这张图的所有细节" -r photo.jpg
-llm chat "把人物脸型改成偏瘦" --edit 商务女性生图.md
-llm chat "按要求改写" --edit 商务女性生图.md -o 商务女性生图.v2.md
-```
-
-规则：
-
-- `prompt` 支持字面量或 `@文件`
-- `--system` 支持字面量或 `@文件`
-- `-r/--reference` 可重复传入多个附件
-- 图片附件会作为多模态图片输入发送；文本附件会先读取内容，再以内联文本形式发送
-- 文本文件若要直接作为主 prompt，请使用 `@文件`
-- `-s/--session` 用于加载并持久化 JSONL 对话历史，可传会话名或文件路径
-- `-I/--interactive` 进入交互式连续对话；默认仅保存在内存中，配合 `-s` 才会加载并持久化
-- `llm chat -I "首轮问题"` 会先发送这条首轮消息，再进入连续对话
-- 单次 `chat` 与 `-I -s ...` 交互模式可以共享同一个会话文件并来回切换
-- `-I` 模式下只有配合 `-s` 才会回放历史消息并持续写回；不带 `-s` 时为纯内存会话
-- `-I` 基于 `prompt_toolkit Application` 提供消息区、输入区和常驻状态栏
-- 交互输入区支持多行粘贴与手动换行；`Enter` 发送，`Shift+Enter` 或 `Ctrl+J` 换行
-- 交互式内置命令：`/clear` 清空当前会话，`/model <name>` 切换当前模型并写回 `CHAT_MODEL`，`/save <name-or-path>` 将当前会话保存到指定文件
-- 如需使用终端原生鼠标拖选复制历史消息，请按住终端模拟器的修饰键；当前环境实测为按住 `Shift` 再拖选
-- `--edit` 用于编辑目标文本文件
-- `--edit` 模式下，模型必须输出 `SEARCH/REPLACE` diff blocks，CLI 自动应用 diff
-- `--edit` 不带 `-o` 时直接覆盖原文件；带 `-o` 时输出到新文件
-- 非 edit 模式下，有 `-o` 时写入文件；无 `-o` 时输出到终端
-- 当前持久会话模式先专注文本连续对话，不与 `-r/--edit` 组合
-- `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只会覆盖会话开头连续的 system 消息，其余历史保留
-- `chat` / `image` / `audio` 当前统一通过流式请求收集结果
-- 非交互 `chat` 与 `audio` 会实时把流式文本写到 stdout
-- 若 `chat` 使用图片模型并返回图片，会自动落盘并显示图片路径
-
-## image
-
-```bash
-llm image "画一只猫"
-llm image @prompt.txt -o cat.jpg
-llm image "保留主体，改成极简插画风格" -r photo.jpg
-llm image @prompt.txt -r ref.png -s @system.txt -o result.jpg
-llm image "融合两张参考图" -r ref-a.jpg -r ref-b.jpg -o result.jpg
-llm image @prompts/couple-photo.md -r refs/person-a.jpg -r refs/person-b.jpg -o outputs/couple-photo/result.jpg -n 4
-llm image "生成三张海报方案" -n 3 -o poster.jpg
-llm image "生成横版海报" --size 2K --aspect 16:9 -o poster.jpg
-```
-
-规则：
-
-- `prompt` 支持字面量或 `@文件`
-- `-s/--system` 支持字面量或 `@文件`
-- `-r/--reference` 为可选附件上传，可重复传入多个
-- 文本约束若要直接并入 prompt，请使用 `@文件`
-- `-n/--count` 用于控制生成数量，单命令多图会遵循 image 模式并发配置
-- `--size` 支持 `512 / 1K / 2K / 4K`
-- `--aspect` 支持 `1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9`
-- `--size/--aspect` 会继续通过 OpenAI 兼容 `chat/completions` 入口发送，并附加到顶层 `image_config`
-- batch YAML 中的 `aspect` 建议写成带引号的字符串，例如 `"16:9"`，避免 YAML 把它解析成其他类型
-- 多图模式会输出轻量进度：开始、每张完成、最终写入结果
-- `-o poster.jpg -n 3` 时会输出为 `poster.jpg`、`poster_1.jpg`、`poster_2.jpg`
-- 无 `-o` 时，默认输出到当前目录下的 `gemini-output/output_时间戳.jpg`
-
-## audio
-
-```bash
-llm audio "总结录音内容" -r demo.mp3
-llm audio -r demo.mp3
-llm audio @prompt.txt -r demo.mp3
-llm audio "请转成带说话人标注的 SRT" -r demo.mp3 -s @system.txt -o demo.srt
-```
-
-规则：
-
-- 主位置参数为可选 prompt，支持字面量或 `@文件`
-- `-r/--reference` 必须传音频文件路径
-- `-s/--system` 支持字面量或 `@文件`
-- 无 `-o` 时，默认实时输出到终端
-- 若要 SRT，请直接在 prompt 里明确要求输出标准 SRT
-
-## batch
-
-```bash
+llm chat "把人物脸型改成偏瘦" --edit prompt.md
+llm image "生成横版海报" --size 2K --aspect 16:9 -o banner.jpg
+llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
 llm batch tasks.yaml
 ```
 
-执行时会输出：
+## 文档入口
 
-- 上游地址
-- 任务总数和并发数
-- 每个任务的开始和完成状态（含使用的模型）
-
-### YAML 示例
-
-```yaml
-mode: chat
-system_prompt: "你是严谨的处理助手"
-output_dir: outputs
-
-tasks:
-  - id: summary
-    prompt: "总结下面内容"
-    input: article.md
-    output: summary.md
-
-  - id: edit-prompt
-    prompt: "把人物脸型改成偏瘦，不要改动其他描述"
-    edit: 商务女性生图.md
-    output: 商务女性生图.v2.md
-
-  - id: hero-image
-    mode: image
-    prompt: "为产品主页生成三张极简横幅图"
-    count: 3
-    size: 2K
-    aspect: "16:9"
-    output: hero.jpg
-
-  - id: transcript
-    mode: audio
-    audio_file: meeting.mp3
-    prompt: "请输出标准 SRT 字幕"
-```
-
-### YAML 顶层字段
-
-| 字段 | 必填 | 说明 | 可被 task 覆盖 |
-|------|------|------|----------------|
-| `mode` | ✓ | 默认任务类型：`chat` / `image` / `audio` | ✓ |
-| `model` | | 全局模型名称，覆盖环境变量配置 | ✓ |
-| `system_prompt` | | 全局 system prompt，支持 `@文件` | ✓ |
-| `input` | | 全局输入文件（chat 模式），路径或路径数组 | ✓ |
-| `reference` | | 全局参考图（chat/image 模式） | ✓ |
-| `audio_file` | | 全局音频文件（audio 模式） | ✓ |
-| `output_dir` | | 任务输出基目录，相对路径基于 YAML 所在目录 | - |
-| `concurrency` | | 并发数 | - |
-| `temperature` | | 温度参数（0.0-2.0） | ✓ |
-| `max_output_tokens` | | 最大输出 token 数 | ✓ |
-| `tasks` | ✓ | 任务数组，不能为空 | - |
-
-### YAML task 字段
-
-| 字段 | 必填 | 适用模式 | 说明 |
-|------|------|----------|------|
-| `id` | | 全部 | 任务标识，默认 `task-序号` |
-| `mode` | | 全部 | 覆盖顶层 `mode` |
-| `model` | | 全部 | 覆盖顶层 `model` |
-| `prompt` | | 全部 | 支持字面量或 `@文件` |
-| `system_prompt` | | 全部 | 覆盖顶层 `system_prompt`，支持 `@文件` |
-| `input` | | chat | 覆盖顶层 `input`，路径或路径数组 |
-| `reference` | | chat / image | 覆盖顶层 `reference` |
-| `audio_file` | | audio | 覆盖顶层 `audio_file` |
-| `edit` | | chat | 目标文本文件，进入 diff 编辑模式 |
-| `count` | | image | 图片生成数量，遵循 image 模式并发配置 |
-| `size` | | image | 图片分辨率档位：`512 / 1K / 2K / 4K` |
-| `aspect` | | image | 图片宽高比：`1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9` |
-| `output` | | 全部 | 输出路径，未指定时使用默认规则 |
-| `temperature` | | 全部 | 覆盖顶层 `temperature` |
-| `max_output_tokens` | | 全部 | 覆盖顶层 `max_output_tokens` |
-
-## 配置
-
-脚本默认从 `~/.config/llm-api/.env` 读取配置，环境变量可覆盖同名字段。
-
-最小配置示例：
-
-```bash
-API_KEY=your_api_key
-BASE_URL=https://your-api-endpoint/v1
-MODEL=your_default_model
-```
-
-按模式拆分模型时可使用：
-
-```bash
-CHAT_MODEL=your_chat_model
-IMAGE_MODEL=your_image_model
-AUDIO_MODEL=your_audio_model
-```
-
-模型优先级：
-
-| 模式 | 优先级 |
-|------|--------|
-| chat | `CHAT_MODEL` → `MODEL` |
-| image | `IMAGE_MODEL` → `MODEL` |
-| audio | `AUDIO_MODEL` → `MODEL` |
-
-并发优先级：
-
-- 顶层 YAML `concurrency`
-- `LLM_CONCURRENCY`
-- 兼容旧变量（仅单一任务类型 batch 时生效）
-- 默认 `4`
-
-常用并发配置示例：
-
-```bash
-LLM_CONCURRENCY=4
-OPENAI_CHAT_CONCURRENCY=4
-OPENAI_IMAGE_CONCURRENCY=4
-```
-
-## 常见错误
-
-| 问题 | 原因 | 正确方式 |
-|------|------|----------|
-| 把 YAML 文件直接传给 `chat` | `chat` 只处理单次任务 | 使用 `batch tasks.yaml` |
-| audio 命令没传 `-r` | audio 的音频文件必须通过 `-r` 提供 | 使用 `llm audio "你的要求" -r demo.m4a` |
-| image/chat 想从文件读取 prompt 但直接写路径 | 未使用 `@` 前缀 | 用 `@prompt.txt` |
-| 想编辑文本文件却传给 `-r` | `-r` 是参考输入，不会修改文件 | 用 `--edit file.md` |
-| batch 中 audio 任务写成 `audio` 字段 | 字段名不对 | 使用 `audio_file` |
-
-## --debug
-
-`--debug` 可以放在任意位置：
-
-```bash
-llm --debug chat "test"
-llm chat --debug "test"
-llm chat "test" --debug
-```
-
-## 默认输出规则
-
-| 模式 | 未指定输出时 |
-|------|--------------|
-| chat | 打印到终端 |
-| image | `./gemini-output/output_时间戳.jpg` |
-| audio | 打印到终端 |
+- 完整使用说明：[`README.md`](./README.md)
+- 开发参考：[`DEVELOPING.md`](./DEVELOPING.md)
