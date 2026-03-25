@@ -159,6 +159,7 @@ def run_batch(yaml_path_str: str):
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     global_system_prompt = data.get("system_prompt")
+    global_prompt = data.get("prompt")
     global_temperature = data.get("temperature")
     global_max_output_tokens = data.get("max_output_tokens")
     global_input = data.get("input")
@@ -178,7 +179,7 @@ def run_batch(yaml_path_str: str):
             "index": index,
             "id": task.get("id", f"task-{index}"),
             "mode": mode,
-            "prompt": task.get("prompt"),
+            "prompt": task.get("prompt", global_prompt),
             "system_prompt": task.get("system_prompt", global_system_prompt),
             "input_paths": input_paths,
             "reference": task.get("reference", global_reference),

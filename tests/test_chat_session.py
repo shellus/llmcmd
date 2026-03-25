@@ -374,6 +374,38 @@ tasks:
         self.assertEqual(captured["image_size"], "2K")
         self.assertEqual(captured["image_aspect_ratio"], "16:9")
 
+    def test_batch_top_level_prompt_is_forwarded_to_chat_tasks(self):
+        from llm_cli.batch import run_batch
+
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-chat-model", {"BASE_URL": "https://example.com/v1"}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["prompt"] = kwargs["prompt"]
+            return {"mode": mode, "text": "ok", "printed": True}
+
+        yaml_content = """\
+mode: chat
+prompt: "@instruction.md"
+tasks:
+  - id: chat-task
+    reference:
+      - "ref.md"
+"""
+
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            yaml_path = tmp_path / "tasks.yaml"
+            yaml_path.write_text(yaml_content, encoding="utf-8")
+            (tmp_path / "instruction.md").write_text("顶层提示词", encoding="utf-8")
+            (tmp_path / "ref.md").write_text("参考文件", encoding="utf-8")
+            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                run_batch(str(yaml_path))
+
+        self.assertEqual(captured["prompt"], "@instruction.md")
+
     def test_single_chat_with_session_loads_history_and_appends(self):
         with TemporaryDirectory() as tmp:
             session_path = Path(tmp) / "demo.jsonl"
