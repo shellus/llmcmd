@@ -342,6 +342,101 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(captured["extra_body"]["image_config"]["image_size"], "2K")
         self.assertEqual(captured["extra_body"]["image_config"]["aspect_ratio"], "16:9")
 
+    def test_video_api_debug_logs_include_request_and_response(self):
+        from llm_cli import api as api_module
+
+        stderr = StringIO()
+        old_stderr = os.sys.stderr
+        old_debug = api_module.DEBUG
+        os.sys.stderr = stderr
+        api_module.set_debug(True)
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"id":"vid_123","status":"completed"}'
+
+        client = SimpleNamespace(base_url="https://example.com/v1", api_key="sk-test")
+
+        try:
+            with patch("llm_cli.api.urllib.request.urlopen", lambda request, timeout=300: FakeResponse()):
+                api_module.get_video_task(client, "vid_123")
+        finally:
+            os.sys.stderr = old_stderr
+            api_module.set_debug(old_debug)
+
+        log = stderr.getvalue()
+        self.assertIn("视频请求方法:", log)
+        self.assertIn("/videos/vid_123", log)
+        self.assertIn("视频响应:", log)
+
+    def test_video_api_debug_logs_http_error_body(self):
+        from llm_cli import api as api_module
+
+        stderr = StringIO()
+        old_stderr = os.sys.stderr
+        old_debug = api_module.DEBUG
+        os.sys.stderr = stderr
+        api_module.set_debug(True)
+
+        class FakeHTTPError(api_module.urllib.error.HTTPError):
+            def __init__(self):
+                super().__init__(
+                    url="https://example.com/v1/videos",
+                    code=403,
+                    msg="Forbidden",
+                    hdrs={"Content-Type": "application/json"},
+                    fp=None,
+                )
+
+            def read(self):
+                return b'{"error":{"message":"forbidden","type":"permission_error"}}'
+
+        client = SimpleNamespace(base_url="https://example.com/v1", api_key="sk-test")
+
+        try:
+            with patch("llm_cli.api.urllib.request.urlopen", side_effect=FakeHTTPError()):
+                with self.assertRaises(api_module.urllib.error.HTTPError):
+                    api_module.get_video_task(client, "vid_123")
+        finally:
+            os.sys.stderr = old_stderr
+            api_module.set_debug(old_debug)
+
+        log = stderr.getvalue()
+        self.assertIn("视频错误状态: 403", log)
+        self.assertIn("视频错误响应体:", log)
+        self.assertIn("permission_error", log)
+
+    def test_video_headers_include_default_user_agent(self):
+        from llm_cli.api import _json_headers
+
+        client = SimpleNamespace(api_key="sk-test")
+        headers = _json_headers(client)
+
+        self.assertIn("User-Agent", headers)
+        self.assertTrue(headers["User-Agent"])
+
+    def test_video_headers_allow_user_agent_override_from_env(self):
+        from llm_cli import api as api_module
+
+        client = SimpleNamespace(api_key="sk-test")
+        old_value = os.environ.get("USER_AGENT")
+        os.environ["USER_AGENT"] = "curl/8.5.0"
+        try:
+            headers = api_module._json_headers(client)
+        finally:
+            if old_value is None:
+                os.environ.pop("USER_AGENT", None)
+            else:
+                os.environ["USER_AGENT"] = old_value
+
+        self.assertEqual(headers["User-Agent"], "curl/8.5.0")
+
     def test_batch_image_task_passes_size_and_aspect_to_run_task(self):
         from llm_cli.batch import run_batch
 
@@ -1053,6 +1148,281 @@ tasks:
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "user")
         self.assertEqual(messages[0]["content"], "主要求\n\n补充约束")
+
+    def test_video_command_passes_creation_args_to_run_task(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-video-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured.update(kwargs)
+            return {"mode": mode, "output_paths": ["/tmp/result.mp4"], "task_id": "vid_123", "printed": False}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(
+                cli,
+                ["video", "生成测试视频", "-r", "cover.jpg", "--seconds", "8", "--size", "720x1280", "-o", "demo.mp4"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["prompt"], "生成测试视频")
+        self.assertEqual(captured["reference"], ("cover.jpg",))
+        self.assertEqual(captured["video_seconds"], "8")
+        self.assertEqual(captured["video_size"], "720x1280")
+        self.assertEqual(captured["output"], "demo.mp4")
+
+    def test_video_command_passes_resume_id_to_run_task(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-video-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured.update(kwargs)
+            return {"mode": mode, "output_paths": ["/tmp/result.mp4"], "task_id": "vid_123", "printed": False}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["video", "--resume", "vid_123"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["resume_task_id"], "vid_123")
+        self.assertIsNone(captured["prompt"])
+
+    def test_resolve_model_prefers_video_model(self):
+        from llm_cli.config import resolve_model
+
+        config = {
+            "MODEL": "global-model",
+            "VIDEO_MODEL": "video-model",
+        }
+
+        self.assertEqual(resolve_model("video", config), "video-model")
+
+    def test_run_task_video_resumes_until_completion_and_downloads(self):
+        from llm_cli.task import run_task
+
+        created = []
+        polled = []
+        downloaded = []
+
+        def fake_create_video_task(client, **kwargs):
+            created.append(kwargs)
+            return {"id": "vid_123", "status": "queued"}
+
+        poll_responses = iter(
+            [
+                {"id": "vid_123", "status": "processing"},
+                {
+                    "id": "vid_123",
+                    "status": "succeeded",
+                    "video_url": "https://example.com/files/vid_123.mp4",
+                },
+            ]
+        )
+
+        def fake_get_video_task(client, task_id):
+            polled.append(task_id)
+            return next(poll_responses)
+
+        def fake_extract_video_result(task, output_path, task_id=None, progress_callback=None):
+            downloaded.append((task, output_path, task_id))
+            return ["/tmp/result.mp4"]
+
+        with patch("llm_cli.task.create_video_task", fake_create_video_task), patch(
+            "llm_cli.task.get_video_task", fake_get_video_task
+        ), patch("llm_cli.task.extract_video_result", fake_extract_video_result), patch("llm_cli.task.time.sleep", lambda *_: None):
+            result = run_task(
+                "video",
+                object(),
+                "test-video-model",
+                prompt="生成视频",
+                reference="cover.jpg",
+                video_seconds="8",
+                video_size="720x1280",
+                output="/tmp/out.mp4",
+            )
+
+        self.assertEqual(created[0]["prompt"], "生成视频")
+        self.assertEqual(created[0]["seconds"], "8")
+        self.assertEqual(created[0]["size"], "720x1280")
+        self.assertEqual(polled, ["vid_123", "vid_123"])
+        self.assertEqual(downloaded[0][1], "/tmp/out.mp4")
+        self.assertEqual(downloaded[0][2], "vid_123")
+        self.assertEqual(result["task_id"], "vid_123")
+        self.assertEqual(result["output_paths"], ["/tmp/result.mp4"])
+
+    def test_run_task_video_uses_staged_poll_schedule(self):
+        from llm_cli.task import _video_poll_delay
+
+        self.assertEqual(_video_poll_delay(0), 30)
+        self.assertEqual(_video_poll_delay(299), 30)
+        self.assertEqual(_video_poll_delay(300), 60)
+        self.assertEqual(_video_poll_delay(1200), 60)
+
+    def test_run_task_video_resume_still_waits_before_first_query(self):
+        from llm_cli.task import run_task
+
+        sleeps = []
+
+        def fake_get_video_task(client, task_id):
+            return {"id": task_id, "status": "succeeded"}
+
+        def fake_extract_video_result(task, output_path, task_id=None, progress_callback=None):
+            return ["/tmp/result.mp4"]
+
+        with patch("llm_cli.task.get_video_task", fake_get_video_task), patch(
+            "llm_cli.task.extract_video_result", fake_extract_video_result
+        ), patch("llm_cli.task.time.sleep", lambda seconds: sleeps.append(seconds)):
+            run_task(
+                "video",
+                object(),
+                "test-video-model",
+                resume_task_id="vid_123",
+                output="/tmp/out.mp4",
+            )
+
+        self.assertEqual(sleeps, [30])
+
+    def test_run_task_video_resume_skips_creation(self):
+        from llm_cli.task import run_task
+
+        downloaded = []
+
+        def fake_get_video_task(client, task_id):
+            return {"id": task_id, "status": "succeeded", "video_url": "https://example.com/files/vid_123.mp4"}
+
+        def fake_extract_video_result(task, output_path, task_id=None, progress_callback=None):
+            downloaded.append((task, output_path, task_id))
+            return ["/tmp/result.mp4"]
+
+        with patch("llm_cli.task.create_video_task") as create_mock, patch(
+            "llm_cli.task.get_video_task", fake_get_video_task
+        ), patch("llm_cli.task.extract_video_result", fake_extract_video_result):
+            result = run_task(
+                "video",
+                object(),
+                "test-video-model",
+                resume_task_id="vid_123",
+                output="/tmp/out.mp4",
+            )
+
+        create_mock.assert_not_called()
+        self.assertEqual(downloaded[0][2], "vid_123")
+        self.assertEqual(result["task_id"], "vid_123")
+
+    def test_extract_video_result_uses_content_api_when_task_id_present(self):
+        from llm_cli.output import extract_video_result
+
+        client = object()
+
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp) / "video.mp4"
+            with patch("llm_cli.output.download_video_content_stream", return_value=iter([b"mp4-bytes"])) as download_mock, patch(
+                "llm_cli.output.urllib.request.urlopen"
+            ) as urlopen_mock:
+                paths = extract_video_result(
+                    {
+                        "_client": client,
+                        "video_url": "https://example.com/video.mp4",
+                    },
+                    str(target),
+                    task_id="vid_123",
+                )
+
+        download_mock.assert_called_once_with(client, "vid_123")
+        urlopen_mock.assert_not_called()
+        self.assertEqual(paths, [str(target)])
+
+    def test_extract_video_result_streams_chunks_to_file(self):
+        from llm_cli.output import extract_video_result
+
+        class FakeStream:
+            def __iter__(self):
+                return iter([b"abc", b"def", b""])
+
+        client = object()
+        progress_events = []
+
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp) / "video.mp4"
+            with patch("llm_cli.output.download_video_content_stream", return_value=FakeStream()):
+                paths = extract_video_result(
+                    {"_client": client},
+                    str(target),
+                    task_id="vid_123",
+                    progress_callback=lambda event, **payload: progress_events.append((event, payload)),
+                )
+            self.assertEqual(target.read_bytes(), b"abcdef")
+
+        self.assertEqual(paths, [str(target)])
+        self.assertEqual(progress_events[0][0], "download_start")
+        self.assertEqual(progress_events[-1][0], "download_done")
+
+    def test_run_task_video_accepts_task_id_field_from_create_response(self):
+        from llm_cli.task import run_task
+
+        def fake_create_video_task(client, **kwargs):
+            return {"task_id": "vid_abc", "status": "queued"}
+
+        def fake_get_video_task(client, task_id):
+            return {"id": task_id, "status": "succeeded", "video_url": "https://example.com/files/vid_abc.mp4"}
+
+        def fake_extract_video_result(task, output_path, task_id=None, progress_callback=None):
+            return ["/tmp/result.mp4"]
+
+        with patch("llm_cli.task.create_video_task", fake_create_video_task), patch(
+            "llm_cli.task.get_video_task", fake_get_video_task
+        ), patch("llm_cli.task.extract_video_result", fake_extract_video_result), patch("llm_cli.task.time.sleep", lambda *_: None):
+            result = run_task(
+                "video",
+                object(),
+                "test-video-model",
+                prompt="生成视频",
+                output="/tmp/out.mp4",
+            )
+
+        self.assertEqual(result["task_id"], "vid_abc")
+
+    def test_batch_video_task_passes_seconds_and_size_to_run_task(self):
+        from llm_cli.batch import run_batch
+
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-video-model", {"BASE_URL": "https://example.com/v1"}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["video_seconds"] = kwargs["video_seconds"]
+            captured["video_size"] = kwargs["video_size"]
+            captured["reference"] = kwargs["reference"]
+            return {"mode": mode, "output_paths": ["/tmp/hero.mp4"], "task_id": "vid_123", "printed": False}
+
+        yaml_content = """\
+mode: video
+tasks:
+  - id: hero-video
+    prompt: "生成横版产品视频"
+    seconds: "8"
+    size: 1280x720
+    reference:
+      - cover.jpg
+    output: hero.mp4
+"""
+
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            yaml_path = tmp_path / "tasks.yaml"
+            yaml_path.write_text(yaml_content, encoding="utf-8")
+            (tmp_path / "cover.jpg").write_bytes(b"fake")
+            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                run_batch(str(yaml_path))
+
+        self.assertEqual(captured["video_seconds"], "8")
+        self.assertEqual(captured["video_size"], "1280x720")
+        self.assertEqual(captured["reference"], ["cover.jpg"])
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ def normalize_mode(value, field_name="mode"):
     if value == "text":
         value = "chat"
     if value not in MODE_ALIASES:
-        fail(f"{field_name} 必须是 chat / image / audio，当前为: {value}")
+        fail(f"{field_name} 必须是 chat / image / audio / video，当前为: {value}")
     return value
 
 
@@ -65,6 +65,11 @@ def validate_task_fields(mode, task, index):
             fail(f"第 {index} 个 audio task 缺少 audio_file")
         if task.get("reference"):
             fail(f"第 {index} 个 audio task 不支持 reference")
+    elif mode == "video":
+        if not task.get("prompt") and not task.get("resume_task_id"):
+            fail(f"第 {index} 个 video task 缺少 prompt 或 resume_task_id")
+        if task.get("audio_file"):
+            fail(f"第 {index} 个 video task 不支持 audio_file")
 
 
 def get_batch_concurrency(modes, configs, yaml_data):
@@ -77,6 +82,7 @@ def get_batch_concurrency(modes, configs, yaml_data):
             "chat": "OPENAI_CHAT_CONCURRENCY",
             "text": "OPENAI_CHAT_CONCURRENCY",
             "image": "OPENAI_IMAGE_CONCURRENCY",
+            "video": "OPENAI_VIDEO_CONCURRENCY",
         }
         only_mode = next(iter(modes))
         legacy_name = env_names.get(only_mode)
@@ -117,6 +123,10 @@ def resolve_task_output(mode, task, output_dir, yaml_dir):
     if mode == "audio":
         audio_path = resolve_path(task["audio_file"], base_dir=yaml_dir)
         return str(audio_path.with_suffix(".srt"))
+    if mode == "video":
+        base_dir = Path(output_dir).resolve() if output_dir else (yaml_dir / "gemini-output").resolve()
+        task_id = task.get("id") or f"task_{datetime.now().strftime('%H%M%S_%f')}"
+        return str(base_dir / f"{task_id}.mp4")
 
     return None
 
@@ -192,6 +202,9 @@ def run_batch(yaml_path_str: str):
             "count": task.get("count", 1),
             "image_size": task.get("size"),
             "image_aspect_ratio": task.get("aspect"),
+            "video_seconds": task.get("seconds"),
+            "video_size": task.get("size"),
+            "resume_task_id": task.get("resume_task_id"),
             "config": None,
         }
         validate_task_fields(mode, task_spec, index)
@@ -252,6 +265,9 @@ def run_batch(yaml_path_str: str):
             image_count=task_spec["count"],
             image_size=task_spec["image_size"],
             image_aspect_ratio=task_spec["image_aspect_ratio"],
+            video_seconds=task_spec["video_seconds"],
+            video_size=task_spec["video_size"],
+            resume_task_id=task_spec["resume_task_id"],
             config=task_spec["config"],
             progress_callback=progress if task_spec["mode"] == "image" and task_spec["count"] > 1 else None,
         )
@@ -271,6 +287,8 @@ def run_batch(yaml_path_str: str):
                 _, result = future.result()
                 if result["mode"] == "image":
                     print(f"[{task_id}] 已写入图片: {', '.join(result['output_paths'])}")
+                elif result["mode"] == "video":
+                    print(f"[{task_id}] 已写入视频: {', '.join(result['output_paths'])}")
                 elif result.get("output_path"):
                     print(f"[{task_id}] 已写入: {result['output_path']}")
                 else:

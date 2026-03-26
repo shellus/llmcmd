@@ -6,6 +6,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+from .api import download_video_content_stream
 from .utils import fail
 
 
@@ -91,6 +92,30 @@ def extract_image_result(response, output_path, image_index=0):
     raise ValueError("未在响应中提取到图片")
 
 
+def extract_video_result(task, output_path, task_id=None, progress_callback=None):
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if task_id and isinstance(task, dict) and task.get("_client") is not None:
+        try:
+            if progress_callback:
+                progress_callback("download_start", task_id=task_id, path=str(output_path))
+            bytes_written = 0
+            with output_path.open("wb") as file:
+                for chunk in download_video_content_stream(task["_client"], task_id):
+                    file.write(chunk)
+                    bytes_written += len(chunk)
+                    if progress_callback:
+                        progress_callback("download_progress", task_id=task_id, bytes_written=bytes_written)
+            if progress_callback:
+                progress_callback("download_done", task_id=task_id, path=str(output_path), bytes_written=bytes_written)
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            raise ValueError(f"下载视频失败: {task_id} ({exc})") from exc
+        return [str(output_path)]
+
+    raise ValueError("下载视频失败：缺少 task_id 或 client，无法调用 /content 接口")
+
+
 def parse_search_replace_blocks(text):
     pattern = re.compile(
         r"<<<<<<< SEARCH\n(.*?)\n=======\n(.*?)\n>>>>>>> REPLACE",
@@ -147,6 +172,11 @@ def default_output_path(mode, source_path=None):
         target_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return str(target_dir / f"output_{timestamp}.jpg")
+    if mode == "video":
+        target_dir = Path.cwd() / "gemini-output"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return str(target_dir / f"output_{timestamp}.mp4")
     if mode == "audio":
         if not source_path:
             fail("audio 模式缺少输入文件，无法推导默认输出路径")

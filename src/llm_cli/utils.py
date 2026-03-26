@@ -1,9 +1,11 @@
 import sys
 from pathlib import Path
 
-MODE_ALIASES = {"chat", "text", "image", "audio"}
+MODE_ALIASES = {"chat", "text", "image", "audio", "video"}
 IMAGE_SIZE_CHOICES = ("512", "1K", "2K", "4K")
 IMAGE_ASPECT_CHOICES = ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9")
+VIDEO_SECONDS_CHOICES = ("4", "8", "10", "12", "15", "16", "20")
+VIDEO_SIZE_CHOICES = ("720x1280", "1280x720", "1024x1024", "720p")
 
 
 def fail(message):

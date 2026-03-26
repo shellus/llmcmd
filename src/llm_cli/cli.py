@@ -10,7 +10,7 @@ from .config import create_client
 from .interactive import run_interactive_chat
 from .session import append_session_messages, load_session_messages, replace_leading_system_messages, resolve_session_path, rewrite_session_messages
 from .task import run_task
-from .utils import IMAGE_ASPECT_CHOICES, IMAGE_SIZE_CHOICES, fail, resolve_text
+from .utils import IMAGE_ASPECT_CHOICES, IMAGE_SIZE_CHOICES, VIDEO_SECONDS_CHOICES, VIDEO_SIZE_CHOICES, fail, resolve_text
 
 
 def _now_iso():
@@ -39,6 +39,32 @@ def _image_progress(event, **payload):
         print(f"开始生成 {payload['total']} 张图片（并发数: {payload['concurrency']}）")
     elif event == "progress":
         print(f"[{payload['completed']}/{payload['total']}] 已完成")
+
+
+def _video_progress(event, **payload):
+    if event == "task_created":
+        print(f"任务 ID: {payload['task_id']}")
+    elif event == "poll" and api.DEBUG:
+        progress = payload.get("progress")
+        waited_seconds = payload.get("waited_seconds")
+        next_delay_seconds = payload.get("next_delay_seconds")
+        suffix = f", progress={progress}" if progress is not None else ""
+        if waited_seconds is not None:
+            suffix += f", waited={waited_seconds}s"
+        if next_delay_seconds is not None:
+            suffix += f", next_poll={next_delay_seconds}s"
+        click.echo(f"[DEBUG] 视频状态: task_id={payload['task_id']}, status={payload.get('status')}{suffix}", err=True)
+    elif event == "task_completed" and api.DEBUG:
+        click.echo(f"[DEBUG] 视频完成: task_id={payload['task_id']}, status={payload.get('status')}", err=True)
+    elif event == "download_start" and api.DEBUG:
+        click.echo(f"[DEBUG] 开始下载视频: task_id={payload['task_id']}, path={payload['path']}", err=True)
+    elif event == "download_progress" and api.DEBUG:
+        click.echo(f"[DEBUG] 视频下载进度: task_id={payload['task_id']}, bytes={payload['bytes_written']}", err=True)
+    elif event == "download_done" and api.DEBUG:
+        click.echo(
+            f"[DEBUG] 视频下载完成: task_id={payload['task_id']}, bytes={payload['bytes_written']}, path={payload['path']}",
+            err=True,
+        )
 
 
 def _render_text_result(result):
@@ -266,6 +292,57 @@ def image(prompt, reference, system, output, count, image_size, image_aspect_rat
 @cli.command(
     epilog="""\b
 使用示例:
+  llm video "生成一段海边航拍视频"
+  llm video "生成产品展示短片" -r first-frame.jpg --seconds 8 --size 720x1280 -o demo.mp4
+  llm video --resume vid_123 -o demo.mp4
+"""
+)
+@click.argument("prompt", required=False, default=None, metavar="[PROMPT|@FILE]")
+@click.option("-r", "--reference", multiple=True, help="上传首帧参考图；当前仅使用第一张")
+@click.option("-s", "--system", default=None, help="预留参数；当前 video 模式暂不使用 system prompt")
+@click.option("-o", "--output", default=None, help="输出路径")
+@click.option("--seconds", type=click.Choice(VIDEO_SECONDS_CHOICES), default="4", show_default=True, help="视频时长秒数")
+@click.option("--size", "video_size", type=click.Choice(VIDEO_SIZE_CHOICES), default="720x1280", show_default=True, help="视频分辨率")
+@click.option("--resume", "resume_task_id", default=None, help="跳过创建，按任务 ID 恢复等待并下载")
+@click.option("--model", default=None, help="覆盖当前 mode 的模型")
+@click.option("-t", "--temperature", type=float, default=None, help="预留参数；当前 video 模式暂不使用")
+@click.option("-m", "--max-output-tokens", type=int, default=None, help="预留参数；当前 video 模式暂不使用")
+@click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
+def video(prompt, reference, system, output, seconds, video_size, resume_task_id, model, temperature, max_output_tokens):
+    """异步视频生成，默认等待完成并自动下载。"""
+    if system:
+        fail("video 子命令当前暂不支持 --system")
+    if resume_task_id and prompt:
+        fail("video 子命令使用 --resume 时不能再传 prompt")
+    if resume_task_id and reference:
+        fail("video 子命令使用 --resume 时不能再传 -r/--reference")
+    if not resume_task_id and not prompt:
+        fail("video 子命令需要 prompt，或使用 --resume")
+    client, resolved_model, config = create_client("video", explicit_model=model)
+    result = _run_safely(
+        run_task,
+        "video",
+        client,
+        resolved_model,
+        prompt=prompt,
+        reference=reference,
+        output=output,
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        video_seconds=seconds,
+        video_size=video_size,
+        resume_task_id=resume_task_id,
+        config=config,
+        progress_callback=_video_progress,
+    )
+    if not resume_task_id and result.get("task_id"):
+        print(f"任务已完成: {result['task_id']}")
+    print("已写入视频:", ", ".join(result["output_paths"]))
+
+
+@cli.command(
+    epilog="""\b
+使用示例:
   llm audio "总结录音内容" -r demo.m4a
   llm audio -r demo.m4a
   llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
@@ -320,7 +397,7 @@ def batch(yaml_path):
     """YAML 批量执行。
 
     读取批处理配置并并发执行多个任务。
-    YAML 中支持 mode: chat / image / audio，chat 模式支持 reference 图片输入。
+    YAML 中支持 mode: chat / image / audio / video，chat 模式支持 reference 图片输入。
     """
     _run_safely(run_batch, yaml_path)
 

@@ -1,10 +1,31 @@
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .api import api_call
+from .api import api_call, create_video_task, get_video_task
 from .config import get_mode_concurrency
 from .messages import DEFAULT_EDIT_PROMPT, build_messages
-from .output import apply_search_replace_blocks, default_output_path, extract_image_result, extract_text_result, response_has_images, write_text_output
+from .output import (
+    apply_search_replace_blocks,
+    default_output_path,
+    extract_image_result,
+    extract_text_result,
+    extract_video_result,
+    response_has_images,
+    write_text_output,
+)
 from .utils import read_input_files, read_text_file, resolve_path, resolve_text
+
+VIDEO_POLL_INITIAL_DELAY_SECONDS = 30
+VIDEO_POLL_INTERVAL_EARLY_SECONDS = 30
+VIDEO_POLL_INTERVAL_LATE_SECONDS = 60
+VIDEO_POLL_INTERVAL_SWITCH_SECONDS = 300
+VIDEO_POLL_TIMEOUT_SECONDS = 1800
+
+
+def _video_poll_delay(elapsed_seconds):
+    if elapsed_seconds < VIDEO_POLL_INTERVAL_SWITCH_SECONDS:
+        return VIDEO_POLL_INTERVAL_EARLY_SECONDS
+    return VIDEO_POLL_INTERVAL_LATE_SECONDS
 
 
 def run_task(
@@ -29,6 +50,9 @@ def run_task(
     stream_handler=None,
     image_size=None,
     image_aspect_ratio=None,
+    video_seconds=None,
+    video_size=None,
+    resume_task_id=None,
 ):
     if messages is None:
         prompt_text = resolve_text(prompt, base_dir=base_dir)
@@ -60,7 +84,7 @@ def run_task(
     if audio_file:
         audio_path = str(resolve_path(audio_file, base_dir=base_dir))
 
-    if messages is None:
+    if messages is None and mode != "video":
         messages = build_messages(
             effective_mode,
             prompt=prompt_text,
@@ -82,6 +106,60 @@ def run_task(
                 "modalities": ["image", "text"],
                 "image_config": image_config,
             }
+
+    if mode == "video":
+        output_path = output or default_output_path("video")
+        output_path = str(resolve_path(output_path, base_dir=base_dir)) if output else output_path
+
+        if resume_task_id:
+            task_id = resume_task_id
+            task = {"id": task_id, "status": "queued"}
+        else:
+            reference_file = reference_path[0] if reference_path else None
+            task = create_video_task(
+                client,
+                model=model,
+                prompt=prompt_text,
+                seconds=video_seconds,
+                size=video_size,
+                input_reference=reference_file,
+            )
+            task_id = task.get("id") or task.get("task_id")
+            if not task_id:
+                raise ValueError(f"创建视频任务失败，响应缺少 id/task_id: {task}")
+            if progress_callback:
+                progress_callback("task_created", task_id=task_id, status=task.get("status"))
+
+        terminal_success = {"succeeded", "completed", "success"}
+        terminal_failed = {"failed", "error", "cancelled", "canceled"}
+        task_status = str(task.get("status") or "").lower()
+        waited_seconds = 0
+        while task_status not in terminal_success:
+            if task_status in terminal_failed:
+                raise ValueError(f"视频任务失败: {task_id} ({task.get('status')})")
+            if waited_seconds >= VIDEO_POLL_TIMEOUT_SECONDS:
+                raise ValueError(f"视频任务等待超时: {task_id}（已等待 {waited_seconds} 秒）")
+            delay_seconds = VIDEO_POLL_INITIAL_DELAY_SECONDS if waited_seconds == 0 else _video_poll_delay(waited_seconds)
+            if progress_callback:
+                progress_callback(
+                    "poll",
+                    task_id=task_id,
+                    status=task.get("status"),
+                    progress=task.get("progress"),
+                    waited_seconds=waited_seconds,
+                    next_delay_seconds=delay_seconds,
+                )
+            time.sleep(delay_seconds)
+            waited_seconds += delay_seconds
+            task = get_video_task(client, task_id)
+            task_status = str(task.get("status") or "").lower()
+
+        task = dict(task)
+        task["_client"] = client
+        if progress_callback:
+            progress_callback("task_completed", task_id=task_id, status=task.get("status"))
+        saved_paths = extract_video_result(task, output_path, task_id=task_id, progress_callback=progress_callback)
+        return {"mode": mode, "output_paths": saved_paths, "task_id": task_id, "printed": False}
 
     response = api_call(
         client,

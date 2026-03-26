@@ -35,6 +35,7 @@ def resolve_model(mode, config, explicit_model=None):
         "text": ["CHAT_MODEL", "MODEL"],
         "image": ["IMAGE_MODEL", "MODEL"],
         "audio": ["AUDIO_MODEL", "MODEL"],
+        "video": ["VIDEO_MODEL", "MODEL"],
     }
 
     for name in chains[mode]:
@@ -69,6 +70,7 @@ def get_mode_concurrency(mode, config, default=4):
             "chat": "OPENAI_CHAT_CONCURRENCY",
             "text": "OPENAI_CHAT_CONCURRENCY",
             "image": "OPENAI_IMAGE_CONCURRENCY",
+            "video": "OPENAI_VIDEO_CONCURRENCY",
         }
         raw = get_config_value(legacy_names.get(mode), config) if legacy_names.get(mode) else None
     if raw is None:

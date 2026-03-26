@@ -7,7 +7,7 @@
 - 写文案、总结、翻译、提取结构化数据
 - 根据参考图生成或修改图片
 - 把音频转成文本或 SRT 字幕
-- 用 YAML 一次编排多条 chat / image / audio 任务
+- 用 YAML 一次编排多条 chat / image / audio / video 任务
 - 直接在终端里按要求编辑文本文件
 - 用 JSONL 持久化 `chat` 会话，并在终端里连续对话
 
@@ -86,7 +86,21 @@ llm audio -r demo.m4a
 llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
 ```
 
-### 6. YAML 批量编排
+### 6. 视频生成
+
+```bash
+llm video "生成一段海边航拍视频"
+llm video "生成产品展示短片" -r first-frame.jpg --seconds 8 --size 720x1280 -o demo.mp4
+llm video --resume vid_123 -o demo.mp4
+```
+
+说明：
+
+- `video` 默认先创建异步任务，再持续等待完成并自动下载
+- 创建成功后会先打印任务 ID，便于中断后用 `--resume` 恢复
+- `-r/--reference` 当前用于上传首帧参考图，仅使用第一张
+
+### 7. YAML 批量编排
 
 ```bash
 llm batch tasks.yaml
@@ -122,6 +136,15 @@ tasks:
     mode: audio
     audio_file: meeting.mp3
     prompt: "请输出标准 SRT 字幕"
+
+  - id: promo-video
+    mode: video
+    prompt: "生成一段产品宣传短片"
+    reference:
+      - cover.jpg
+    seconds: "8"
+    size: 720x1280
+    output: promo.mp4
 ```
 
 ## 命令速览
@@ -174,6 +197,16 @@ llm chat -I -s ./sessions/product-review.jsonl
 ### `llm audio`
 用于把音频送入模型处理，位置参数是 prompt，`-r/--reference` 上传音频附件；默认实时输出到 stdout，仅在传 `-o` 时写文件。若要 SRT，请直接在 prompt 中明确要求。
 
+### `llm video`
+用于异步视频生成。默认会创建任务、等待完成并自动下载，也支持通过 `--resume <task_id>` 恢复等待并下载。
+
+补充说明：
+
+- `--seconds` 支持 `4 / 8 / 12 / 16 / 20`
+- `--size` 当前支持 `720x1280 / 1280x720 / 1024x1024`
+- `-r/--reference` 当前仅取第一张图作为 `input_reference`
+- 下载固定走 `GET /v1/videos/{id}/content`
+
 ### `llm batch`
 用于 YAML 批量任务编排。
 
@@ -199,6 +232,7 @@ MODEL=your_default_model
 CHAT_MODEL=your_chat_model
 IMAGE_MODEL=your_image_model
 AUDIO_MODEL=your_audio_model
+VIDEO_MODEL=your_video_model
 ```
 
 常用并发配置：
@@ -207,6 +241,8 @@ AUDIO_MODEL=your_audio_model
 LLM_CONCURRENCY=4
 OPENAI_CHAT_CONCURRENCY=4
 OPENAI_IMAGE_CONCURRENCY=4
+OPENAI_VIDEO_CONCURRENCY=2
+USER_AGENT=curl/8.5.0
 ```
 
 模型选择顺序：
@@ -214,6 +250,7 @@ OPENAI_IMAGE_CONCURRENCY=4
 - `chat`：`CHAT_MODEL` → `MODEL`
 - `image`：`IMAGE_MODEL` → `MODEL`
 - `audio`：`AUDIO_MODEL` → `MODEL`
+- `video`：`VIDEO_MODEL` → `MODEL`
 
 ## 包信息
 
