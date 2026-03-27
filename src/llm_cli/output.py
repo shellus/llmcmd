@@ -102,7 +102,12 @@ def extract_video_result(task, output_path, task_id=None, progress_callback=None
                 progress_callback("download_start", task_id=task_id, path=str(output_path))
             bytes_written = 0
             with output_path.open("wb") as file:
-                for chunk in download_video_content_stream(task["_client"], task_id):
+                for chunk in download_video_content_stream(
+                    task["_client"],
+                    task_id,
+                    config=task.get("_config"),
+                    task=task,
+                ):
                     file.write(chunk)
                     bytes_written += len(chunk)
                     if progress_callback:

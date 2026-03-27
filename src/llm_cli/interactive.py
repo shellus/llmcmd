@@ -570,7 +570,7 @@ def _create_textual_app(
             env_path, _ = load_env_file()
             write_env_value(env_path, "CHAT_MODEL", argument)
             state.set_model(argument)
-            state.append_message("system", f"已切换模型并写回 CHAT_MODEL={argument}")
+            state.append_message("system", f"已切换模型并写回 {env_path} 中的 CHAT_MODEL={argument}")
 
         def _handle_save_command(self, argument: str) -> None:
             if not argument:

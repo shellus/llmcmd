@@ -13,6 +13,7 @@ from .output import (
     response_has_images,
     write_text_output,
 )
+from .reference_transport import prepare_reference_resources
 from .utils import read_input_files, read_text_file, resolve_path, resolve_text
 
 VIDEO_POLL_INITIAL_DELAY_SECONDS = 30
@@ -26,6 +27,13 @@ def _video_poll_delay(elapsed_seconds):
     if elapsed_seconds < VIDEO_POLL_INTERVAL_SWITCH_SECONDS:
         return VIDEO_POLL_INTERVAL_EARLY_SECONDS
     return VIDEO_POLL_INTERVAL_LATE_SECONDS
+
+
+def _get_video_task_with_config(getter, client, task_id, config):
+    try:
+        return getter(client, task_id, config=config)
+    except TypeError:
+        return getter(client, task_id)
 
 
 def run_task(
@@ -76,10 +84,12 @@ def run_task(
 
     reference_path = None
     if reference:
-        if isinstance(reference, (list, tuple)):
-            reference_path = [str(resolve_path(item, base_dir=base_dir)) for item in reference]
-        else:
-            reference_path = [str(resolve_path(reference, base_dir=base_dir))]
+        raw_references = list(reference) if isinstance(reference, (list, tuple)) else [reference]
+        prepared_references = prepare_reference_resources(raw_references, config=config, base_dir=base_dir)
+        reference_path = prepared_references["local_paths"]
+        reference_urls = prepared_references["url_references"]
+    else:
+        reference_urls = []
     audio_path = None
     if audio_file:
         audio_path = str(resolve_path(audio_file, base_dir=base_dir))
@@ -123,6 +133,8 @@ def run_task(
                 seconds=video_seconds,
                 size=video_size,
                 input_reference=reference_file,
+                reference_urls=reference_urls,
+                config=config,
             )
             task_id = task.get("id") or task.get("task_id")
             if not task_id:
@@ -151,11 +163,12 @@ def run_task(
                 )
             time.sleep(delay_seconds)
             waited_seconds += delay_seconds
-            task = get_video_task(client, task_id)
+            task = _get_video_task_with_config(get_video_task, client, task_id, config)
             task_status = str(task.get("status") or "").lower()
 
         task = dict(task)
         task["_client"] = client
+        task["_config"] = config
         if progress_callback:
             progress_callback("task_completed", task_id=task_id, status=task.get("status"))
         saved_paths = extract_video_result(task, output_path, task_id=task_id, progress_callback=progress_callback)

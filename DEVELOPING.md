@@ -41,11 +41,13 @@ cli.py
 - `src/llm_cli/cli.py`
   负责命令入口、参数定义和基础校验
 - `src/llm_cli/config.py`
-  负责读取 `~/.config/llm-api/.env`，创建 OpenAI 客户端，解析模型与并发配置
+  负责读取 `~/.llm/{.env,config.yaml}`，构建运行时配置实例，创建 OpenAI 客户端，并解析 provider、模型与并发配置
 - `src/llm_cli/task.py`
   负责统一组织一次任务执行，把 CLI 参数转成消息或请求级元数据，再调用上游
 - `src/llm_cli/messages.py`
   负责消息内容本身的构造，是多模态输入的核心收口点
+- `src/llm_cli/reference_transport.py`
+  负责按配置把参考文件预处理为可直接提供给上游的 URL
 - `src/llm_cli/api.py`
   负责统一调用 `chat.completions.create(stream=True)` 并收集流式结果
 - `src/llm_cli/output.py`

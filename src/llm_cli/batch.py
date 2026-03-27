@@ -77,16 +77,6 @@ def get_batch_concurrency(modes, configs, yaml_data):
     if raw is None:
         shared_config = next(iter(configs.values()))
         raw = get_config_value("LLM_CONCURRENCY", shared_config)
-    if raw is None and len(modes) == 1:
-        env_names = {
-            "chat": "OPENAI_CHAT_CONCURRENCY",
-            "text": "OPENAI_CHAT_CONCURRENCY",
-            "image": "OPENAI_IMAGE_CONCURRENCY",
-            "video": "OPENAI_VIDEO_CONCURRENCY",
-        }
-        only_mode = next(iter(modes))
-        legacy_name = env_names.get(only_mode)
-        raw = get_config_value(legacy_name, configs[only_mode]) if legacy_name else None
     if raw is None:
         raw = "4"
     try:
@@ -214,13 +204,12 @@ def run_batch(yaml_path_str: str):
 
     clients = {}
     configs = {}
-    base_url = None
+    provider_names = []
     for mode in modes:
         client, model, config = create_client(mode)
         clients[mode] = (client, model)
         configs[mode] = config
-        if base_url is None:
-            base_url = get_config_value("BASE_URL", config)
+        provider_names.append((config.get("provider") or {}).get("name") or get_config_value("BASE_URL", config) or mode)
 
     for spec in prepared:
         spec["config"] = configs[spec["mode"]]
@@ -229,7 +218,7 @@ def run_batch(yaml_path_str: str):
 
     total = len(prepared)
     max_workers = min(total, concurrency)
-    print(f"上游地址: {base_url}")
+    print(f"Providers: {', '.join(sorted(set(provider_names)))}")
     print(f"开始执行 {total} 个任务（并发数: {max_workers}）\n")
 
     def run_one(task_spec):

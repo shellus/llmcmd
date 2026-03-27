@@ -1,4 +1,5 @@
 import copy
+import base64
 import json
 import mimetypes
 import os
@@ -88,6 +89,16 @@ def _json_headers(client):
     }
 
 
+def _json_body_request(url, body, headers, method):
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method=method,
+    )
+    return _json_request(request)
+
+
 def _multipart_body(fields, files):
     boundary = f"----llmcmd-{uuid4().hex}"
     chunks = []
@@ -129,6 +140,13 @@ def _json_request(request):
     if DEBUG:
         debug_log("视频请求方法:", request.get_method())
         debug_log("视频请求 URL:", request.full_url)
+        body = getattr(request, "data", None)
+        if body:
+            try:
+                parsed = json.loads(body.decode("utf-8"))
+                debug_log("视频请求体:", json.dumps(sanitize_debug_value(parsed), ensure_ascii=False, indent=2))
+            except Exception:
+                debug_log("视频请求体摘要:", f"<{len(body)} bytes>")
     try:
         with urllib.request.urlopen(request, timeout=300) as response:
             payload = response.read().decode("utf-8")
@@ -150,7 +168,60 @@ def _json_request(request):
     return json.loads(payload)
 
 
-def create_video_task(client, *, model, prompt=None, seconds=None, size=None, input_reference=None):
+def _as_data_url(path):
+    file_path = Path(path)
+    mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+    return f"data:{mime_type};base64,{base64.b64encode(file_path.read_bytes()).decode('ascii')}"
+
+
+def create_video_task(
+    client,
+    *,
+    model,
+    prompt=None,
+    seconds=None,
+    size=None,
+    input_reference=None,
+    reference_urls=None,
+    config=None,
+):
+    protocol = ((config or {}).get("mode") or {}).get("protocol") or "openai-videos"
+    mode_defaults = ((config or {}).get("mode") or {}).get("defaults") or {}
+    request_options = ((config or {}).get("mode") or {}).get("request") or {}
+
+    if protocol == "unified-video":
+        body = {
+            "model": model,
+            "prompt": prompt,
+            "aspect_ratio": request_options.get("aspect_ratio") or mode_defaults.get("aspect_ratio"),
+            "size": size or request_options.get("size") or mode_defaults.get("size"),
+            "images": list(reference_urls or []),
+        }
+        if not body["images"] and input_reference:
+            try:
+                body["images"] = [_as_data_url(input_reference)]
+            except OSError as exc:
+                raise ValueError(f"读取视频参考图失败: {input_reference} ({exc})") from exc
+        headers = _json_headers(client)
+        headers["Content-Type"] = "application/json"
+        return _json_body_request(f"{_client_base_url(client)}/video/create", body, headers, "POST")
+
+    if DEBUG:
+        debug_log(
+            "视频请求体摘要:",
+            json.dumps(
+                {
+                    "model": model,
+                    "prompt": prompt,
+                    "seconds": seconds,
+                    "size": size,
+                    "input_reference": Path(input_reference).name if input_reference else None,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+
     boundary, body = _multipart_body(
         {
             "model": model,
@@ -173,7 +244,15 @@ def create_video_task(client, *, model, prompt=None, seconds=None, size=None, in
     return _json_request(request)
 
 
-def get_video_task(client, task_id):
+def get_video_task(client, task_id, config=None):
+    protocol = ((config or {}).get("mode") or {}).get("protocol") or "openai-videos"
+    if protocol == "unified-video":
+        request = urllib.request.Request(
+            f"{_client_base_url(client)}/video/query?id={urllib.parse.quote(str(task_id))}",
+            headers=_json_headers(client),
+            method="GET",
+        )
+        return _json_request(request)
     request = urllib.request.Request(
         f"{_client_base_url(client)}/videos/{urllib.parse.quote(str(task_id))}",
         headers=_json_headers(client),
@@ -195,15 +274,26 @@ def download_video_content(client, task_id):
         return response.read()
 
 
-def download_video_content_stream(client, task_id, chunk_size=1024 * 256):
-    request = urllib.request.Request(
-        f"{_client_base_url(client)}/videos/{urllib.parse.quote(str(task_id))}/content",
-        headers={
-            "Authorization": f"Bearer {_client_api_key(client)}",
-            "User-Agent": _video_user_agent(),
-        },
-        method="GET",
-    )
+def download_video_content_stream(client, task_id, chunk_size=1024 * 256, config=None, task=None):
+    protocol = ((config or {}).get("mode") or {}).get("protocol") or "openai-videos"
+    if protocol == "unified-video":
+        video_url = (task or {}).get("video_url")
+        if not video_url:
+            raise ValueError("视频任务缺少 video_url，无法下载")
+        request = urllib.request.Request(
+            video_url,
+            headers={"User-Agent": _video_user_agent()},
+            method="GET",
+        )
+    else:
+        request = urllib.request.Request(
+            f"{_client_base_url(client)}/videos/{urllib.parse.quote(str(task_id))}/content",
+            headers={
+                "Authorization": f"Bearer {_client_api_key(client)}",
+                "User-Agent": _video_user_agent(),
+            },
+            method="GET",
+        )
     if DEBUG:
         debug_log("视频下载请求方法:", request.get_method())
         debug_log("视频下载 URL:", request.full_url)

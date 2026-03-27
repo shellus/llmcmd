@@ -375,6 +375,47 @@ class ChatSessionTests(unittest.TestCase):
         self.assertIn("/videos/vid_123", log)
         self.assertIn("视频响应:", log)
 
+    def test_video_api_debug_logs_include_newapi_request_body_summary(self):
+        from llm_cli import api as api_module
+
+        stderr = StringIO()
+        old_stderr = os.sys.stderr
+        old_debug = api_module.DEBUG
+        os.sys.stderr = stderr
+        api_module.set_debug(True)
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"id":"vid_123","status":"processing"}'
+
+        client = SimpleNamespace(base_url="https://example.com/v1", api_key="sk-test")
+
+        try:
+            with patch("llm_cli.api.urllib.request.urlopen", lambda request, timeout=300: FakeResponse()):
+                api_module.create_video_task(
+                    client,
+                    model="grok-video-3",
+                    prompt="test prompt",
+                    size="720P",
+                    reference_urls=["https://signed.example.com/a.jpg?x=1"],
+                    config={"mode": {"protocol": "unified-video"}},
+                )
+        finally:
+            os.sys.stderr = old_stderr
+            api_module.set_debug(old_debug)
+
+        log = stderr.getvalue()
+        self.assertIn("视频请求体:", log)
+        self.assertIn('"model": "grok-video-3"', log)
+        self.assertIn('"size": "720P"', log)
+        self.assertIn('"images"', log)
+
     def test_video_api_debug_logs_http_error_body(self):
         from llm_cli import api as api_module
 
@@ -937,28 +978,200 @@ tasks:
             self.assertIsNone(resolved)
 
     def test_resolve_model_uses_new_two_level_model_chain(self):
-        from llm_cli.config import resolve_model
+        from llm_cli.config import resolve_mode_settings
 
         config = {
-            "MODEL": "global-model",
-            "CHAT_MODEL": "chat-model",
-            "IMAGE_MODEL": "image-model",
-            "AUDIO_MODEL": "audio-model",
+            "modes": {
+                "chat": {"provider": "openai", "model": "chat-model"},
+                "image": {"provider": "openai", "model": "image-model"},
+                "audio": {"provider": "openai", "model": "audio-model"},
+            },
+            "providers": {
+                "openai": {
+                    "base_url": "https://example.com/v1",
+                    "api_key": "demo-key",
+                }
+            },
         }
 
-        self.assertEqual(resolve_model("chat", config), "chat-model")
-        self.assertEqual(resolve_model("text", config), "chat-model")
-        self.assertEqual(resolve_model("image", config), "image-model")
-        self.assertEqual(resolve_model("audio", config), "audio-model")
+        self.assertEqual(resolve_mode_settings("chat", config)["model"], "chat-model")
+        self.assertEqual(resolve_mode_settings("text", config)["model"], "chat-model")
+        self.assertEqual(resolve_mode_settings("image", config)["model"], "image-model")
+        self.assertEqual(resolve_mode_settings("audio", config)["model"], "audio-model")
 
     def test_resolve_model_falls_back_to_global_model(self):
-        from llm_cli.config import resolve_model
+        from llm_cli.config import resolve_mode_settings
 
-        config = {"MODEL": "global-model"}
+        config = {
+            "default_provider": "shared",
+            "default_model": "global-model",
+            "providers": {
+                "shared": {
+                    "base_url": "https://example.com/v1",
+                    "api_key": "demo-key",
+                }
+            },
+        }
 
-        self.assertEqual(resolve_model("chat", config), "global-model")
-        self.assertEqual(resolve_model("image", config), "global-model")
-        self.assertEqual(resolve_model("audio", config), "global-model")
+        self.assertEqual(resolve_mode_settings("chat", config)["model"], "global-model")
+        self.assertEqual(resolve_mode_settings("image", config)["model"], "global-model")
+        self.assertEqual(resolve_mode_settings("audio", config)["model"], "global-model")
+
+    def test_load_runtime_config_uses_new_default_paths_and_expands_env_placeholders(self):
+        from llm_cli.config import load_runtime_config
+
+        with TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_dir = home / ".llm"
+            config_dir.mkdir(parents=True)
+            (config_dir / ".env").write_text("TEST_API_KEY=from-dot-env\n", encoding="utf-8")
+            (config_dir / "config.yaml").write_text(
+                """
+default_provider: openai
+modes:
+  chat:
+    model: chat-default
+providers:
+  openai:
+    base_url: https://example.com/v1
+    api_key: ${TEST_API_KEY}
+    modes:
+      chat:
+        concurrency: 6
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("pathlib.Path.home", return_value=home), patch.dict(os.environ, {}, clear=True):
+                runtime = load_runtime_config()
+
+        self.assertEqual(runtime["paths"]["env_file"], config_dir / ".env")
+        self.assertEqual(runtime["paths"]["config_file"], config_dir / "config.yaml")
+        self.assertEqual(runtime["providers"]["openai"]["api_key"], "from-dot-env")
+        self.assertEqual(runtime["modes"]["chat"]["model"], "chat-default")
+
+    def test_load_runtime_config_prefers_runtime_environment_over_dot_env(self):
+        from llm_cli.config import load_runtime_config
+
+        with TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_dir = home / ".llm"
+            config_dir.mkdir(parents=True)
+            (config_dir / ".env").write_text("TEST_API_KEY=from-dot-env\n", encoding="utf-8")
+            (config_dir / "config.yaml").write_text(
+                """
+default_provider: openai
+providers:
+  openai:
+    base_url: https://example.com/v1
+    api_key: ${TEST_API_KEY}
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("pathlib.Path.home", return_value=home), patch.dict(os.environ, {"TEST_API_KEY": "from-runtime"}, clear=True):
+                runtime = load_runtime_config()
+
+        self.assertEqual(runtime["providers"]["openai"]["api_key"], "from-runtime")
+
+    def test_create_client_resolves_provider_protocol_and_explicit_model_alias(self):
+        from llm_cli.config import create_client
+
+        with TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_dir = home / ".llm"
+            config_dir.mkdir(parents=True)
+            (config_dir / ".env").write_text("VIDEO_KEY=test-video-key\n", encoding="utf-8")
+            (config_dir / "config.yaml").write_text(
+                """
+default_provider: text-provider
+modes:
+  chat:
+    provider: text-provider
+    model: text-chat-model
+  video:
+    provider: reverse-video
+    model: sora_t2v_turbo
+providers:
+  text-provider:
+    base_url: https://text.example.com/v1
+    api_key: text-key
+    models:
+      text-chat-model:
+        type: chat
+        alias: chat-default
+  reverse-video:
+    base_url: https://video.example.com/v1
+    api_key: ${VIDEO_KEY}
+    models:
+      sora_t2v_turbo:
+        type: video
+        alias: sora-fast
+        protocol: unified-video
+      sora_t2v_pro:
+        type: video
+        alias: sora-pro
+        protocol: unified-video
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            captured = {}
+
+            def fake_openai(api_key=None, base_url=None):
+                captured["api_key"] = api_key
+                captured["base_url"] = base_url
+                return SimpleNamespace(api_key=api_key, base_url=base_url)
+
+            with patch("pathlib.Path.home", return_value=home), patch("llm_cli.config.OpenAI", fake_openai):
+                client, model, config = create_client("video", explicit_model="sora-pro")
+
+        self.assertEqual(model, "sora_t2v_pro")
+        self.assertEqual(captured["api_key"], "test-video-key")
+        self.assertEqual(captured["base_url"], "https://video.example.com/v1")
+        self.assertEqual(config["provider"]["name"], "reverse-video")
+        self.assertEqual(config["mode"]["protocol"], "unified-video")
+
+    def test_resolve_mode_settings_attaches_named_reference_transport(self):
+        from llm_cli.config import resolve_mode_settings
+
+        config = {
+            "default_provider": "reverse-video",
+            "reference_transports": {
+                "aliyun-s3": {
+                    "endpoint": "https://oss.example.com",
+                    "bucket": "demo-bucket",
+                    "region": "cn-hangzhou",
+                    "access_key_id": "ak",
+                    "secret_access_key": "sk",
+                    "public_base_url": "https://cdn.example.com",
+                }
+            },
+            "providers": {
+                "reverse-video": {
+                    "base_url": "https://video.example.com/v1",
+                    "api_key": "video-key",
+                    "models": {
+                        "video-model": {
+                            "type": "video",
+                            "alias": "video-default",
+                            "reference_transport": "aliyun-s3",
+                        }
+                    },
+                }
+            },
+            "modes": {
+                "video": {"provider": "reverse-video", "model": "video-model"},
+            },
+        }
+
+        settings = resolve_mode_settings("video", config)
+
+        self.assertEqual(settings["mode"]["reference_transport"], "aliyun-s3")
+        self.assertEqual(settings["reference_transport"]["bucket"], "demo-bucket")
 
     def test_write_env_value_updates_existing_key_and_preserves_others(self):
         from llm_cli.config import write_env_value
@@ -1171,7 +1384,25 @@ tasks:
         self.assertEqual(captured["reference"], ("cover.jpg",))
         self.assertEqual(captured["video_seconds"], "8")
         self.assertEqual(captured["video_size"], "720x1280")
-        self.assertEqual(captured["output"], "demo.mp4")
+
+    def test_video_command_accepts_arbitrary_size_and_seconds_values(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-video-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["video_seconds"] = kwargs["video_seconds"]
+            captured["video_size"] = kwargs["video_size"]
+            return {"mode": mode, "output_paths": ["/tmp/result.mp4"], "task_id": "vid_123", "printed": False}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["video", "生成测试视频", "--seconds", "10", "--size", "1080P"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["video_seconds"], "10")
+        self.assertEqual(captured["video_size"], "1080P")
 
     def test_video_command_passes_resume_id_to_run_task(self):
         captured = {}
@@ -1191,15 +1422,57 @@ tasks:
         self.assertEqual(captured["resume_task_id"], "vid_123")
         self.assertIsNone(captured["prompt"])
 
-    def test_resolve_model_prefers_video_model(self):
-        from llm_cli.config import resolve_model
+    def test_resolve_mode_settings_prefers_video_mode_over_global_default(self):
+        from llm_cli.config import resolve_mode_settings
 
         config = {
-            "MODEL": "global-model",
-            "VIDEO_MODEL": "video-model",
+            "default_provider": "shared",
+            "default_model": "global-model",
+            "modes": {
+                "video": {"provider": "video-provider", "model": "video-model"},
+            },
+            "providers": {
+                "shared": {
+                    "base_url": "https://example.com/v1",
+                    "api_key": "shared-key",
+                    "models": {"global-model": {"type": "chat"}},
+                },
+                "video-provider": {
+                    "base_url": "https://video.example.com/v1",
+                    "api_key": "video-key",
+                    "models": {"video-model": {"type": "video"}},
+                },
+            },
         }
 
-        self.assertEqual(resolve_model("video", config), "video-model")
+        settings = resolve_mode_settings("video", config)
+
+        self.assertEqual(settings["model"], "video-model")
+        self.assertEqual(settings["provider"]["name"], "video-provider")
+
+    def test_resolve_mode_settings_accepts_explicit_model_alias_from_provider_models(self):
+        from llm_cli.config import resolve_mode_settings
+
+        config = {
+            "modes": {
+                "video": {"provider": "reverse-video", "model": "sora_t2v_turbo"},
+            },
+            "providers": {
+                "reverse-video": {
+                    "base_url": "https://video.example.com/v1",
+                    "api_key": "video-key",
+                    "models": {
+                        "sora_t2v_turbo": {"type": "video", "alias": "sora-fast"},
+                        "sora_t2v_pro": {"type": "video", "alias": "sora-pro"},
+                    },
+                }
+            },
+        }
+
+        settings = resolve_mode_settings("video", config, explicit_model="sora-pro")
+
+        self.assertEqual(settings["model"], "sora_t2v_pro")
+        self.assertEqual(settings["model_config"]["alias"], "sora-pro")
 
     def test_run_task_video_resumes_until_completion_and_downloads(self):
         from llm_cli.task import run_task
@@ -1332,9 +1605,217 @@ tasks:
                     task_id="vid_123",
                 )
 
-        download_mock.assert_called_once_with(client, "vid_123")
+        download_mock.assert_called_once_with(client, "vid_123", config=None, task={"_client": client, "video_url": "https://example.com/video.mp4"})
         urlopen_mock.assert_not_called()
         self.assertEqual(paths, [str(target)])
+
+    def test_create_video_task_uses_newapi_unified_protocol_payload(self):
+        from llm_cli.api import create_video_task
+
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"id":"task-1","status":"pending"}'
+
+        def fake_urlopen(request, timeout=300):
+            captured["url"] = request.full_url
+            captured["content_type"] = request.headers["Content-type"]
+            captured["body"] = request.data.decode("utf-8")
+            return FakeResponse()
+
+        client = SimpleNamespace(base_url="https://video.example.com/v1", api_key="demo-key")
+        config = {
+            "mode": {
+                "protocol": "unified-video",
+                "defaults": {"aspect_ratio": "16:9"},
+            }
+        }
+
+        with TemporaryDirectory() as tmp:
+            image_path = Path(tmp) / "cover.jpg"
+            image_path.write_bytes(b"fake-image")
+            with patch("llm_cli.api.urllib.request.urlopen", fake_urlopen):
+                result = create_video_task(
+                    client,
+                    model="sora-fast-real",
+                    prompt="test prompt",
+                    size="720p",
+                    input_reference=str(image_path),
+                    config=config,
+                )
+
+        self.assertEqual(result["id"], "task-1")
+        self.assertEqual(captured["url"], "https://video.example.com/v1/video/create")
+        self.assertEqual(captured["content_type"], "application/json")
+        self.assertIn('"aspect_ratio": "16:9"', captured["body"])
+        self.assertIn('"size": "720p"', captured["body"])
+        self.assertIn('"images": ["data:image/jpeg;base64,', captured["body"])
+
+    def test_prepare_reference_resources_uploads_files_to_named_transport(self):
+        from llm_cli.reference_transport import prepare_reference_resources
+
+        uploads = []
+
+        class FakeClient:
+            def put_object(self, Bucket=None, Key=None, Body=None, ContentType=None):
+                uploads.append((Bucket, Key, Body, ContentType))
+
+        config = {
+            "mode": {
+                "reference_transport": "aliyun-s3",
+            },
+            "reference_transports": {
+                "aliyun-s3": {
+                    "endpoint": "https://oss.example.com",
+                    "bucket": "demo-bucket",
+                    "region": "cn-hangzhou",
+                    "access_key_id": "ak",
+                    "secret_access_key": "sk",
+                    "public_base_url": "https://cdn.example.com/assets",
+                    "key_prefix": "llmcmd",
+                }
+            },
+        }
+
+        with TemporaryDirectory() as tmp:
+            first = Path(tmp) / "first.png"
+            second = Path(tmp) / "second.jpg"
+            first.write_bytes(b"one")
+            second.write_bytes(b"two")
+            with patch("llm_cli.reference_transport.create_s3_client", return_value=FakeClient()), patch(
+                "llm_cli.reference_transport.time_ns",
+                side_effect=[1111111111111111111, 2222222222222222222],
+            ), patch(
+                "llm_cli.reference_transport.uuid4",
+                side_effect=[
+                    SimpleNamespace(hex="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                    SimpleNamespace(hex="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+                ],
+            ):
+                result = prepare_reference_resources([str(first), str(second)], config=config)
+
+        self.assertEqual(result["local_paths"], [str(first), str(second)])
+        self.assertEqual(
+            result["url_references"],
+            [
+                "https://cdn.example.com/assets/llmcmd/1111111111111111111-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+                "https://cdn.example.com/assets/llmcmd/2222222222222222222-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg",
+            ],
+        )
+        self.assertEqual(uploads[0][0], "demo-bucket")
+        self.assertEqual(uploads[0][1], "llmcmd/1111111111111111111-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png")
+        self.assertEqual(uploads[0][2], b"one")
+        self.assertEqual(uploads[0][3], "image/png")
+        self.assertEqual(uploads[1][1], "llmcmd/2222222222222222222-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg")
+        self.assertEqual(uploads[1][2], b"two")
+        self.assertEqual(uploads[1][3], "image/jpeg")
+
+    def test_prepare_reference_resources_without_transport_preserves_only_local_paths(self):
+        from llm_cli.reference_transport import prepare_reference_resources
+
+        result = prepare_reference_resources(["/tmp/a.png"], config={"mode": {}}, base_dir=None)
+
+        self.assertEqual(result["local_paths"], ["/tmp/a.png"])
+        self.assertEqual(result["url_references"], [])
+
+    def test_prepare_reference_resources_can_return_presigned_urls(self):
+        from llm_cli import api as api_module
+        from llm_cli.reference_transport import prepare_reference_resources
+
+        uploads = []
+        presign_calls = []
+
+        class FakeClient:
+            def put_object(self, Bucket=None, Key=None, Body=None, ContentType=None):
+                uploads.append((Bucket, Key, Body, ContentType))
+
+            def generate_presigned_url(self, operation_name, Params=None, ExpiresIn=None):
+                presign_calls.append((operation_name, Params, ExpiresIn))
+                return f"https://signed.example.com/{Params['Key']}?expires={ExpiresIn}"
+
+        config = {
+            "mode": {
+                "reference_transport": "aliyun-s3",
+            },
+            "reference_transports": {
+                "aliyun-s3": {
+                    "endpoint": "https://oss.example.com",
+                    "bucket": "demo-bucket",
+                    "region": "cn-hangzhou",
+                    "access_key_id": "ak",
+                    "secret_access_key": "sk",
+                    "url_mode": "presign",
+                    "expires_in": 1800,
+                    "key_prefix": "llmcmd",
+                }
+            },
+        }
+
+        stderr = StringIO()
+        old_stderr = os.sys.stderr
+        old_debug = api_module.DEBUG
+        os.sys.stderr = stderr
+        api_module.set_debug(True)
+
+        try:
+            with TemporaryDirectory() as tmp:
+                image_path = Path(tmp) / "first.png"
+                image_path.write_bytes(b"one")
+                with patch("llm_cli.reference_transport.create_s3_client", return_value=FakeClient()), patch(
+                    "llm_cli.reference_transport.time_ns",
+                    return_value=1111111111111111111,
+                ), patch(
+                    "llm_cli.reference_transport.uuid4",
+                    return_value=SimpleNamespace(hex="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                ):
+                    result = prepare_reference_resources([str(image_path)], config=config)
+        finally:
+            os.sys.stderr = old_stderr
+            api_module.set_debug(old_debug)
+
+        self.assertEqual(
+            result["url_references"],
+            ["https://signed.example.com/llmcmd/1111111111111111111-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png?expires=1800"],
+        )
+        self.assertEqual(presign_calls[0][0], "get_object")
+        self.assertEqual(presign_calls[0][1]["Bucket"], "demo-bucket")
+        self.assertEqual(presign_calls[0][1]["Key"], "llmcmd/1111111111111111111-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png")
+        self.assertEqual(presign_calls[0][2], 1800)
+        self.assertIn("参考资源上传开始:", stderr.getvalue())
+        self.assertIn("参考资源签名 URL:", stderr.getvalue())
+
+    def test_create_s3_client_uses_virtual_hosted_style(self):
+        from llm_cli.reference_transport import create_s3_client
+
+        captured = {}
+
+        def fake_client(service_name, **kwargs):
+            captured["service_name"] = service_name
+            captured["kwargs"] = kwargs
+            return object()
+
+        with patch("llm_cli.reference_transport.boto3.client", fake_client):
+            create_s3_client(
+                {
+                    "endpoint": "https://oss-cn-shenzhen.aliyuncs.com",
+                    "region": "cn-shenzhen",
+                    "access_key_id": "ak",
+                    "secret_access_key": "sk",
+                }
+            )
+
+        self.assertEqual(captured["service_name"], "s3")
+        self.assertEqual(captured["kwargs"]["endpoint_url"], "https://oss-cn-shenzhen.aliyuncs.com")
+        self.assertEqual(captured["kwargs"]["config"].s3["addressing_style"], "virtual")
+        self.assertFalse(captured["kwargs"]["config"].s3["payload_signing_enabled"])
+        self.assertEqual(captured["kwargs"]["config"].request_checksum_calculation, "when_required")
 
     def test_extract_video_result_streams_chunks_to_file(self):
         from llm_cli.output import extract_video_result
@@ -1360,6 +1841,78 @@ tasks:
         self.assertEqual(paths, [str(target)])
         self.assertEqual(progress_events[0][0], "download_start")
         self.assertEqual(progress_events[-1][0], "download_done")
+
+    def test_extract_video_result_uses_video_url_for_newapi_unified_protocol(self):
+        from llm_cli.output import extract_video_result
+
+        captured = {}
+
+        class FakeResponse:
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, chunk_size):
+                if not hasattr(self, "_chunks"):
+                    self._chunks = iter([b"video-", b"bytes", b""])
+                return next(self._chunks)
+
+        def fake_urlopen(request, timeout=300):
+            captured["url"] = request.full_url
+            return FakeResponse()
+
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp) / "video.mp4"
+            with patch("llm_cli.api.urllib.request.urlopen", fake_urlopen):
+                paths = extract_video_result(
+                    {
+                        "_client": SimpleNamespace(base_url="https://video.example.com/v1", api_key="demo-key"),
+                        "_config": {"mode": {"protocol": "unified-video"}},
+                        "video_url": "https://cdn.example.com/video.mp4",
+                    },
+                    str(target),
+                    task_id="task-1",
+                )
+            self.assertEqual(paths, [str(target)])
+            self.assertEqual(captured["url"], "https://cdn.example.com/video.mp4")
+            self.assertEqual(target.read_bytes(), b"video-bytes")
+
+    def test_create_video_task_uses_uploaded_urls_for_newapi_unified_protocol(self):
+        from llm_cli.api import create_video_task
+
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"id":"task-1","status":"pending"}'
+
+        def fake_urlopen(request, timeout=300):
+            captured["body"] = request.data.decode("utf-8")
+            return FakeResponse()
+
+        client = SimpleNamespace(base_url="https://video.example.com/v1", api_key="demo-key")
+
+        with patch("llm_cli.api.urllib.request.urlopen", fake_urlopen):
+            create_video_task(
+                client,
+                model="sora-fast-real",
+                prompt="test prompt",
+                size="720p",
+                config={"mode": {"protocol": "unified-video"}},
+                reference_urls=["https://cdn.example.com/a.png", "https://cdn.example.com/b.png"],
+            )
+
+        self.assertIn('"images": ["https://cdn.example.com/a.png", "https://cdn.example.com/b.png"]', captured["body"])
 
     def test_run_task_video_accepts_task_id_field_from_create_response(self):
         from llm_cli.task import run_task
@@ -1423,6 +1976,34 @@ tasks:
         self.assertEqual(captured["video_seconds"], "8")
         self.assertEqual(captured["video_size"], "1280x720")
         self.assertEqual(captured["reference"], ["cover.jpg"])
+
+    def test_batch_video_task_accepts_unrestricted_size_value(self):
+        from llm_cli.batch import run_batch
+
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-video-model", {"BASE_URL": "https://example.com/v1"}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["video_size"] = kwargs["video_size"]
+            return {"mode": mode, "output_paths": ["/tmp/hero.mp4"], "task_id": "vid_123", "printed": False}
+
+        yaml_content = """\
+mode: video
+tasks:
+  - id: hero-video
+    prompt: "生成竖版产品视频"
+    size: "1080P"
+"""
+
+        with TemporaryDirectory() as tmp:
+            yaml_path = Path(tmp) / "tasks.yaml"
+            yaml_path.write_text(yaml_content, encoding="utf-8")
+            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                run_batch(str(yaml_path))
+
+        self.assertEqual(captured["video_size"], "1080P")
 
 
 if __name__ == "__main__":

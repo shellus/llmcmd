@@ -10,7 +10,7 @@ from .config import create_client
 from .interactive import run_interactive_chat
 from .session import append_session_messages, load_session_messages, replace_leading_system_messages, resolve_session_path, rewrite_session_messages
 from .task import run_task
-from .utils import IMAGE_ASPECT_CHOICES, IMAGE_SIZE_CHOICES, VIDEO_SECONDS_CHOICES, VIDEO_SIZE_CHOICES, fail, resolve_text
+from .utils import IMAGE_ASPECT_CHOICES, IMAGE_SIZE_CHOICES, fail, resolve_text
 
 
 def _now_iso():
@@ -191,7 +191,7 @@ def cli():
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--probe-input", is_flag=True, hidden=True, help="调试交互式输入事件")
-@click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
+@click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
 def chat(prompt, reference, edit_path, session_name, system, interactive, output, model, temperature, max_output_tokens, probe_input):
     """对话/文本生成。
 
@@ -255,7 +255,7 @@ def chat(prompt, reference, edit_path, session_name, system, interactive, output
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
-@click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
+@click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
 def image(prompt, reference, system, output, count, image_size, image_aspect_ratio, model, temperature, max_output_tokens):
     """图片生成或参考图编辑。
 
@@ -301,13 +301,13 @@ def image(prompt, reference, system, output, count, image_size, image_aspect_rat
 @click.option("-r", "--reference", multiple=True, help="上传首帧参考图；当前仅使用第一张")
 @click.option("-s", "--system", default=None, help="预留参数；当前 video 模式暂不使用 system prompt")
 @click.option("-o", "--output", default=None, help="输出路径")
-@click.option("--seconds", type=click.Choice(VIDEO_SECONDS_CHOICES), default="4", show_default=True, help="视频时长秒数")
-@click.option("--size", "video_size", type=click.Choice(VIDEO_SIZE_CHOICES), default="720x1280", show_default=True, help="视频分辨率")
+@click.option("--seconds", default="4", show_default=True, help="视频时长秒数；默认原样透传给上游")
+@click.option("--size", "video_size", default="720x1280", show_default=True, help="视频分辨率；默认原样透传给上游")
 @click.option("--resume", "resume_task_id", default=None, help="跳过创建，按任务 ID 恢复等待并下载")
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="预留参数；当前 video 模式暂不使用")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="预留参数；当前 video 模式暂不使用")
-@click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
+@click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
 def video(prompt, reference, system, output, seconds, video_size, resume_task_id, model, temperature, max_output_tokens):
     """异步视频生成，默认等待完成并自动下载。"""
     if system:
@@ -355,7 +355,7 @@ def video(prompt, reference, system, output, seconds, video_size, resume_task_id
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
-@click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
+@click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
 def audio(prompt, audio_file, system, output, model, temperature, max_output_tokens):
     """音频转录为文本或 SRT。
 
@@ -392,7 +392,7 @@ def audio(prompt, audio_file, system, output, model, temperature, max_output_tok
 """
 )
 @click.argument("yaml_path", metavar="YAML_PATH")
-@click.option("--debug", is_flag=True, hidden=True, is_eager=True, expose_value=False, callback=_set_debug)
+@click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
 def batch(yaml_path):
     """YAML 批量执行。
 
