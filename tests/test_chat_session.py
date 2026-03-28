@@ -1076,6 +1076,50 @@ providers:
 
         self.assertEqual(runtime["providers"]["openai"]["api_key"], "from-runtime")
 
+    def test_resolve_mode_settings_prefers_runtime_env_over_yaml_defaults(self):
+        from llm_cli.config import load_runtime_config, resolve_mode_settings
+
+        with TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_dir = home / ".llm"
+            config_dir.mkdir(parents=True)
+            (config_dir / ".env").write_text("", encoding="utf-8")
+            (config_dir / "config.yaml").write_text(
+                """
+default_provider: cpa
+modes:
+  chat:
+    provider: cpa
+    model: gemini-3.1-pro
+providers:
+  cpa:
+    base_url: https://cliproxy.jjcc.fun/v1
+    api_key: cliproxy-key
+    models:
+      antigravity/gemini-3.1-pro-high:
+        type: chat
+        alias: gemini-3.1-pro
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("pathlib.Path.home", return_value=home), patch.dict(
+                os.environ,
+                {
+                    "BASE_URL": "https://supercodex.space/v1",
+                    "API_KEY": "runtime-key",
+                    "CHAT_MODEL": "gpt-5.4",
+                },
+                clear=True,
+            ):
+                runtime = load_runtime_config()
+                resolved = resolve_mode_settings("chat", runtime)
+
+        self.assertEqual(resolved["provider"]["base_url"], "https://supercodex.space/v1")
+        self.assertEqual(resolved["provider"]["api_key"], "runtime-key")
+        self.assertEqual(resolved["model"], "gpt-5.4")
+
     def test_create_client_resolves_provider_protocol_and_explicit_model_alias(self):
         from llm_cli.config import create_client
 
@@ -1473,6 +1517,34 @@ providers:
 
         self.assertEqual(settings["model"], "sora_t2v_pro")
         self.assertEqual(settings["model_config"]["alias"], "sora-pro")
+
+    def test_resolve_mode_settings_allows_undefined_explicit_model_on_selected_provider(self):
+        from llm_cli.config import resolve_mode_settings
+
+        config = {
+            "modes": {
+                "chat": {"provider": "cpa", "model": "default-chat-model"},
+            },
+            "providers": {
+                "cpa": {
+                    "base_url": "https://example.com/v1",
+                    "api_key": "demo-key",
+                    "models": {
+                        "default-chat-model": {
+                            "type": "chat",
+                            "alias": "chat-default",
+                        }
+                    },
+                }
+            },
+        }
+
+        settings = resolve_mode_settings("chat", config, explicit_model="foxa/sonnet-4-5-202500929")
+
+        self.assertEqual(settings["provider"]["name"], "cpa")
+        self.assertEqual(settings["model"], "foxa/sonnet-4-5-202500929")
+        self.assertIsNone(settings["model_config"])
+        self.assertEqual(settings["mode"]["protocol"], "openai_chat")
 
     def test_run_task_video_resumes_until_completion_and_downloads(self):
         from llm_cli.task import run_task

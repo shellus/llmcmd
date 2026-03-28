@@ -163,6 +163,21 @@ def _resolve_provider_for_model(mode, explicit_model, config):
     return None, explicit_model, None
 
 
+def _runtime_model_override(mode):
+    env_names = {
+        "chat": ["CHAT_MODEL", "MODEL"],
+        "text": ["CHAT_MODEL", "MODEL"],
+        "image": ["IMAGE_MODEL", "MODEL"],
+        "audio": ["AUDIO_MODEL", "MODEL"],
+        "video": ["VIDEO_MODEL", "MODEL"],
+    }
+    for name in env_names.get(mode, []):
+        value = os.getenv(name)
+        if value:
+            return value
+    return None
+
+
 def resolve_mode_settings(mode, config, explicit_model=None):
     mode = _normalize_mode(mode)
     providers = config.get("providers") or {}
@@ -171,6 +186,9 @@ def resolve_mode_settings(mode, config, explicit_model=None):
     provider_name = global_mode.get("provider") or config.get("default_provider")
     model = global_mode.get("model") or config.get("default_model")
     model_config = None
+    runtime_model = _runtime_model_override(mode)
+    if runtime_model and not explicit_model:
+        model = runtime_model
 
     if explicit_model:
         matched_provider, mapped_model, matched_model_config = _resolve_provider_for_model(mode, explicit_model, config)
@@ -188,7 +206,15 @@ def resolve_mode_settings(mode, config, explicit_model=None):
 
     provider = dict(providers[provider_name] or {})
     provider["name"] = provider_name
+    runtime_base_url = os.getenv("BASE_URL")
+    runtime_api_key = os.getenv("API_KEY")
+    if runtime_base_url:
+        provider["base_url"] = runtime_base_url
+    if runtime_api_key:
+        provider["api_key"] = runtime_api_key
     provider_mode = _provider_mode_config(provider, mode)
+    runtime_model_unmapped = bool(runtime_model) and not explicit_model and model == runtime_model and model_config is None
+    explicit_model_unmapped = bool(explicit_model) and model == explicit_model and model_config is None
     if model_config is None:
         resolved_model_name, resolved_model_config = _resolve_provider_model(provider, mode, model)
         if resolved_model_name:
@@ -197,7 +223,7 @@ def resolve_mode_settings(mode, config, explicit_model=None):
 
     if not model:
         fail(f"{mode} 模式缺少 model 配置，请检查 config.yaml")
-    if model_config is None:
+    if model_config is None and not explicit_model_unmapped and not runtime_model_unmapped:
         fail(f"{mode} 模式模型未在 provider {provider_name} 中定义: {model}")
 
     base_url = provider.get("base_url")
@@ -208,14 +234,14 @@ def resolve_mode_settings(mode, config, explicit_model=None):
     mode_settings = {
         "name": mode,
         "provider": provider_name,
-        "protocol": model_config.get("protocol") or global_mode.get("protocol") or provider_mode.get("protocol") or (
+        "protocol": (model_config or {}).get("protocol") or global_mode.get("protocol") or provider_mode.get("protocol") or (
             "openai-videos" if mode == "video" else f"openai_{mode}"
         ),
         "model": model,
-        "concurrency": model_config.get("concurrency") or global_mode.get("concurrency") or provider_mode.get("concurrency") or config.get("concurrency"),
-        "reference_transport": model_config.get("reference_transport") or global_mode.get("reference_transport") or provider_mode.get("reference_transport"),
-        "request": dict(model_config.get("request") or {}),
-        "defaults": dict(model_config.get("defaults") or {}),
+        "concurrency": (model_config or {}).get("concurrency") or global_mode.get("concurrency") or provider_mode.get("concurrency") or config.get("concurrency"),
+        "reference_transport": (model_config or {}).get("reference_transport") or global_mode.get("reference_transport") or provider_mode.get("reference_transport"),
+        "request": dict((model_config or {}).get("request") or {}),
+        "defaults": dict((model_config or {}).get("defaults") or {}),
         "raw": global_mode,
     }
 
