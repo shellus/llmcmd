@@ -1,80 +1,102 @@
 ---
 name: llmcmd
-description: Use when handling terminal-first LLM workflows for text generation, image generation, audio transcription, YAML batch tasks, or file-based prompt and reference inputs.
+description: Use when handling terminal-first LLM workflows for text generation, image generation, audio transcription, video generation, YAML batch tasks, persistent chat sessions, or file-based prompt and reference inputs.
 ---
 
 # llmcmd
 
-## Overview
+`shellus-llmcmd` 是一个统一的 LLM 命令行工具，入口命令是 `llm`。
 
-`llmcmd` 是一个终端优先的统一 LLM 命令行技能，核心入口是 `llm`。
+本手册面向直接调用本项目的 Agent 或终端用户，覆盖当前可用能力、常见参数、配置方法与高频示例。
 
-适用目标：
-
-- 用 `chat` 处理生成、总结、改写、结构化提取
-- 用 `image` 生成或编辑图片
-- 用 `audio` 转写、总结或产出字幕
-- 用 `batch` 通过 YAML 批量编排任务
-- 用 `chat --edit` 基于要求直接修改文本文件
-
-## When to Use
+## 适用场景
 
 在以下场景使用本技能：
 
-- 需要把 AI 能力嵌入 shell、脚本、自动化流程或 CI
-- 需要一次性读取本地文本、图片、文档、音频作为参考输入
-- 需要把多步任务收敛到单个 CLI，而不是切换多个网页或客户端
-- 需要持久化会话，在终端中继续同一轮对话
-- 需要批量执行多条 prompt 任务并写出结构化结果
+- 需要把文本、图片、音频、视频能力统一接入 shell、脚本、自动化流程或 CI
+- 需要读取本地文本、图片、文档、音频作为 prompt 或参考输入
+- 需要用 `chat --edit` 按要求直接修改文本文件
+- 需要在终端里持久化会话并继续同一轮对话
+- 需要通过 YAML 一次编排多条 `chat / image / audio / video` 任务
 
-以下情况不适合：
-
-- 只是在网页里做一次普通聊天，不需要命令行集成
-- 任务依赖复杂交互界面，而不是文件、参数和标准输出
-
-## Quick Reference
-
-### 安装
+## 安装
 
 ```bash
 pip install shellus-llmcmd
 ```
 
-命令名：
+安装后命令名是：
 
 ```bash
 llm
 ```
 
-### 四种模式
+## 能力概览
 
 | 模式 | 用途 | 常用输入 | 常用输出 |
 |------|------|----------|----------|
-| `llm chat` | 文本生成、分析、问答、改写、编辑文件 | prompt、`@文件`、`-r` 附件 | stdout、文件、会话 |
+| `llm chat` | 文本生成、分析、问答、改写、编辑文件、持久对话 | prompt、`@文件`、`-r` 附件、会话文件 | stdout、文本文件、会话文件 |
 | `llm image` | 图片生成、参考图编辑 | prompt、`@文件`、`-r` 附件 | 图片文件 |
-| `llm audio` | 音频转写、总结、字幕 | prompt、音频附件 | stdout、字幕文件 |
-| `llm batch` | YAML 批量任务 | `tasks.yaml` | 输出目录内多个结果 |
+| `llm audio` | 音频转写、总结、字幕 | prompt、音频附件 | stdout、文本文件、字幕文件 |
+| `llm video` | 异步视频生成、恢复等待、自动下载 | prompt、首帧参考图、任务 ID | 视频文件 |
+| `llm batch` | YAML 批量任务编排 | `tasks.yaml` | 输出目录内多个结果 |
 
-## Core Patterns
+## 常用输入规则
 
-### 1. 文本任务
+### 1. 直接写 prompt
 
 ```bash
-llm chat "总结重点"
-llm chat @prompt.txt -o result.md
-llm chat "总结这个附件" -r report.pdf
+llm chat "写一段产品介绍"
+llm image "生成横版海报"
+llm video "生成一段海边航拍视频"
 ```
 
-规则：
+### 2. 使用 `@文件`
 
-- `@文件` 会把文本直接读入 prompt
-- `-r/--reference` 用于传入图片、文档、音频等参考附件
-- `-o` 用于写出结果；不写时默认输出到 stdout
-
-### 2. 直接编辑文件
+`@文件` 会把文本文件内容直接读入 prompt，适合长提示词或模板化输入。
 
 ```bash
-llm chat "把语气改得更专业，但不要改变原意" --edit prompt.md
+llm chat @prompt.txt -o result.md
+llm image @prompt.md -o result.jpg
+```
+
+### 3. 使用 `-r/--reference`
+
+`-r/--reference` 用于提供参考输入。可传多次。
+
+```bash
+llm chat "总结这个附件的重点" -r report.pdf
+llm chat "对比两张参考图后总结共同特征" -r photo-a.jpg -r photo-b.jpg
+llm image "融合两张参考图的风格生成图片" -r person.jpg -r style.jpg -o result.jpg
+llm audio "总结录音内容" -r meeting.m4a
+llm video "生成产品展示短片" -r first-frame.jpg --seconds 8 -o demo.mp4
+```
+
+补充规则：
+
+- `chat` 中，图片参考会作为图片输入，文本类附件优先内联为文本
+- `image / audio` 中，参考输入按文件附件处理
+- `video` 当前仅使用第一张参考图作为首帧参考
+
+## `llm chat`
+
+用于文本生成、分析、问答、改写、结构化提取、文件编辑与持久化对话。
+
+### 基本示例
+
+```bash
+llm chat "写一段产品介绍"
+llm chat @prompt.txt -o result.md
+llm chat "总结重点" -r article.md -r notes.pdf
+llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
+```
+
+### 文件编辑
+
+`chat --edit` 会按要求修改目标文本文件。
+
+```bash
+llm chat "把人物脸型改成偏瘦，不要改动其他描述" --edit prompt.md
 llm chat "按要求改写" --edit prompt.md -o prompt.v2.md
 ```
 
@@ -82,23 +104,87 @@ llm chat "按要求改写" --edit prompt.md -o prompt.v2.md
 
 - 改写提示词
 - 修正文案
-- 在保留原结构的前提下局部调整文本
+- 在保留原结构的前提下做局部调整
 
-### 3. 图片生成与参考图编辑
+### 持久化会话
+
+新增会话参数：
+
+- `-s/--session`：加载并持久化对话历史，值可为会话名或 `.jsonl` 路径
+- `-I/--interactive`：进入交互式连续对话；默认仅保存在内存中，配合 `-s` 才会加载并持久化
+
+示例：
+
+```bash
+llm chat "继续上一轮结论" -s worklog
+llm chat -I
+llm chat -I "你是什么模型？"
+llm chat -I -s ./sessions/product-review.jsonl
+```
+
+说明：
+
+- `-s product-review` 会写到当前目录下的 `product-review.jsonl`
+- 单次模式和 `-I -s ...` 交互模式可共享同一个会话文件
+- `llm chat -I "首轮问题"` 会先发送首轮消息，再进入连续对话
+- `-I` 模式下只有配合 `-s` 才会回放历史并持续写回；不带 `-s` 时为纯内存会话
+- 当前持久会话聚焦连续文本对话，不与 `-r/--edit` 组合
+- `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只覆盖会话开头连续的 system 消息
+
+交互式内置命令：
+
+- `/clear`：清空当前会话
+- `/model <name>`：切换当前模型，并写回 `~/.llm/.env` 中的 `CHAT_MODEL`
+- `/save <name-or-path>`：将当前会话保存到指定文件
+
+交互细节：
+
+- 基于 `Textual` 全屏 TUI
+- `Enter` 发送
+- `Shift+Enter` 或 `Ctrl+J` 换行
+- 如需终端原生鼠标拖选复制历史消息，需按住终端模拟器修饰键；当前环境实测为按住 `Shift`
+
+### 输出行为
+
+- 非交互 `chat` 会实时把流式文本写到 stdout
+- 若 `chat` 使用图片模型并返回图片，会自动落盘并显示图片路径
+
+## `llm image`
+
+用于图片生成或参考图编辑，支持多图生成。
+
+### 基本示例
 
 ```bash
 llm image "生成三张海报方案" -n 3 -o poster.jpg
-llm image "融合两张参考图的风格生成图片" -r person.jpg -r style.jpg -o result.jpg
+llm image "融合两张参考图的风格生成情侣自拍" -r person.jpg -r style.jpg -o couple.jpg
 llm image @prompt.md -r ref.jpg -o output.jpg
+llm image @prompts/couple-photo.md -r refs/person-a.jpg -r refs/person-b.jpg -o outputs/couple-photo/result.jpg -n 4
+llm image "生成横版海报" --size 2K --aspect 16:9 -o banner.jpg
 ```
 
-补充参数：
+输出结果示例：
 
-- `-n/--count` 控制生成数量
-- `--size` 支持 `512 / 1K / 2K / 4K`
-- `--aspect` 支持 `1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9`
+- `poster.jpg`
+- `poster_1.jpg`
+- `poster_2.jpg`
 
-### 4. 音频处理
+### 常用参数
+
+- `-n/--count`：生成数量
+- `--size`：支持 `512 / 1K / 2K / 4K`
+- `--aspect`：支持 `1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9`
+
+说明：
+
+- `--size` 和 `--aspect` 的实际生效情况取决于图片后端
+- `image` 当前统一通过流式请求收集结果
+
+## `llm audio`
+
+用于把音频送入模型处理，可做转写、总结、字幕生成。
+
+### 基本示例
 
 ```bash
 llm audio -r demo.m4a
@@ -108,30 +194,40 @@ llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
 
 说明：
 
-- 不提供 prompt 时，可直接做默认转写
-- 需要字幕时，应在 prompt 中明确要求输出格式
+- 位置参数是 prompt
+- `-r/--reference` 上传音频附件
+- 默认实时输出到 stdout，仅在传 `-o` 时写文件
+- 若要 SRT，请直接在 prompt 中明确要求
 
-### 5. 会话持久化
+## `llm video`
+
+用于异步视频生成。默认会创建任务、等待完成并自动下载，也支持按任务 ID 恢复等待并下载。
+
+### 基本示例
 
 ```bash
-llm chat "继续上次讨论" -s worklog
-llm chat -I -s worklog
-llm chat -I "你是什么模型？"
+llm video "生成一段海边航拍视频"
+llm video "生成产品展示短片" -r first-frame.jpg --seconds 8 --size 720x1280 -o demo.mp4
+llm video --resume vid_123 -o demo.mp4
 ```
 
 说明：
 
-- `-s/--session` 读取并持久化会话
-- `-I/--interactive` 进入交互式连续对话
-- `-I` 只有搭配 `-s` 才会回放并写回历史
+- `video` 默认先创建异步任务，再持续等待完成并自动下载
+- 创建成功后会先打印任务 ID，便于中断后用 `--resume` 恢复
+- `-r/--reference` 当前仅取第一张图作为 `input_reference`
+- 下载固定走 `GET /v1/videos/{id}/content`
 
-内置命令：
+常用参数：
 
-- `/clear`
-- `/model <name>`
-- `/save <name-or-path>`
+- `--seconds`：支持 `4 / 8 / 12 / 16 / 20`
+- `--size`：当前支持 `720x1280 / 1280x720 / 1024x1024`
 
-### 6. YAML 批处理
+## `llm batch`
+
+用于 YAML 批量任务编排。
+
+### 基本示例
 
 ```bash
 llm batch tasks.yaml
@@ -150,6 +246,11 @@ tasks:
     input: article.md
     output: summary.md
 
+  - id: edit-prompt
+    prompt: "把人物脸型改成偏瘦，不要改动其他描述"
+    edit: 商务女性生图.md
+    output: 商务女性生图.v2.md
+
   - id: hero-image
     mode: image
     prompt: "为产品主页生成三张极简横幅图"
@@ -157,56 +258,254 @@ tasks:
     size: 2K
     aspect: "16:9"
     output: hero.jpg
+
+  - id: transcript
+    mode: audio
+    audio_file: meeting.mp3
+    prompt: "请输出标准 SRT 字幕"
+
+  - id: promo-video
+    mode: video
+    prompt: "生成一段产品宣传短片"
+    reference:
+      - cover.jpg
+    seconds: "8"
+    size: 720x1280
+    output: promo.mp4
 ```
 
-## Configuration
+说明：
 
-默认配置文件位置：
+- 顶层 `mode` 可为任务提供默认模式
+- 单个任务可通过 `mode` 覆盖默认值
+- `aspect` 建议写成带引号的字符串，例如 `"16:9"`，避免 YAML 误解析
+
+## 配置
+
+默认从以下位置读取配置：
 
 ```bash
-~/.config/llm-api/.env
+~/.llm/.env
+~/.llm/config.yaml
 ```
 
-最小配置：
+加载顺序：
+
+1. 先读取 `~/.llm/.env`，将其中变量写入进程环境；若命令启动时已经存在同名环境变量，则保留运行时环境变量
+2. 再读取 `~/.llm/config.yaml`
+3. 解析 YAML 中的 `${ENV_NAME}` 占位符
+4. 命令执行阶段统一从内存中的配置实例读取 provider、model、base_url、api_key、protocol 等字段
+
+### 快速开始
+
+首次使用时，先准备依赖与配置目录：
 
 ```bash
-API_KEY=your_api_key
-BASE_URL=https://your-api-endpoint/v1
-MODEL=your_default_model
+pip install -U shellus-llmcmd openai pyyaml
+mkdir -p ~/.llm
 ```
 
-按能力拆分模型：
+然后创建 `~/.llm/.env`：
 
 ```bash
-CHAT_MODEL=your_chat_model
-IMAGE_MODEL=your_image_model
-AUDIO_MODEL=your_audio_model
+cat > ~/.llm/.env <<'EOF'
+OPENAI_API_KEY=your_openai_api_key
+REVERSE_VIDEO_KEY=your_reverse_video_key
+EOF
 ```
 
-并发配置：
+再创建 `~/.llm/config.yaml`：
+
+```yaml
+default_provider: openai
+concurrency: 4
+
+modes:
+  chat:
+    provider: openai
+    model: gpt-4.1
+  image:
+    provider: openai
+    model: gpt-image-1
+  audio:
+    provider: openai
+    model: gpt-4o-transcribe
+  video:
+    provider: reverse-video
+    model: sora_t2v_turbo
+
+providers:
+  openai:
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_API_KEY}
+    models:
+      gpt-4.1:
+        type: chat
+      gpt-image-1:
+        type: image
+      gpt-4o-transcribe:
+        type: audio
+
+  reverse-video:
+    base_url: https://your-newapi.example.com/v1
+    api_key: ${REVERSE_VIDEO_KEY}
+    models:
+      sora_t2v_turbo:
+        type: video
+        protocol: unified-video
+```
+
+配置完成后，可先验证：
 
 ```bash
-LLM_CONCURRENCY=4
-OPENAI_CHAT_CONCURRENCY=4
-OPENAI_IMAGE_CONCURRENCY=4
+llm chat "你好，输出一句测试文本"
 ```
 
-模型选择顺序：
+若启动时报错，优先检查：
 
-- `chat`：`CHAT_MODEL` -> `MODEL`
-- `image`：`IMAGE_MODEL` -> `MODEL`
-- `audio`：`AUDIO_MODEL` -> `MODEL`
+- `~/.llm/config.yaml` 是否存在且为合法 YAML
+- `.env` 中引用的环境变量是否与 `config.yaml` 中的 `${...}` 一致
+- 对应 provider 是否同时声明了 `base_url` 和 `api_key`
+- `modes.<mode>.model` 是否能在对应 provider 的 `models` 中找到
+- 本机是否已安装 `openai` 与 `pyyaml`
 
-## Common Mistakes
+### `.env` 示例
 
-- 把适合 `@文件` 的长文本直接硬编码到命令里，导致命令难维护
+```bash
+OPENAI_API_KEY=your_openai_api_key
+REVERSE_VIDEO_KEY=your_reverse_video_key
+USER_AGENT=curl/8.5.0
+```
+
+### `config.yaml` 示例
+
+```yaml
+default_provider: openai
+concurrency: 4
+
+modes:
+  chat:
+    provider: openai
+    model: gpt-4.1
+  image:
+    provider: openai
+    model: gpt-image-1
+  audio:
+    provider: openai
+    model: gpt-4o-transcribe
+  video:
+    provider: reverse-video
+    model: sora_t2v_turbo
+
+providers:
+  openai:
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_API_KEY}
+    models:
+      gpt-4.1:
+        type: chat
+        alias: chat-default
+      gpt-image-1:
+        type: image
+      gpt-4o-transcribe:
+        type: audio
+
+  reverse-video:
+    base_url: https://your-newapi.example.com/v1
+    api_key: ${REVERSE_VIDEO_KEY}
+    models:
+      sora_t2v_turbo:
+        type: video
+        alias: sora-fast
+        protocol: unified-video
+        reference_transport: aliyun-s3
+        defaults:
+          aspect_ratio: "16:9"
+          size: 720p
+      sora_t2v_pro:
+        type: video
+        alias: sora-pro
+        protocol: unified-video
+        reference_transport: aliyun-s3
+
+reference_transports:
+  aliyun-s3:
+    endpoint: ${ALIYUN_S3_ENDPOINT}
+    bucket: ${ALIYUN_S3_BUCKET}
+    region: ${ALIYUN_S3_REGION}
+    access_key_id: ${ALIYUN_S3_ACCESS_KEY_ID}
+    secret_access_key: ${ALIYUN_S3_SECRET_ACCESS_KEY}
+    public_base_url: ${ALIYUN_S3_PUBLIC_BASE_URL}
+    key_prefix: llmcmd
+```
+
+配置说明：
+
+- `modes.<mode>`：声明每个 CLI mode 默认使用哪个 provider、哪个真实模型
+- `providers.<name>`：声明上游的 `base_url`、`api_key`
+- `providers.<name>.models.<model_name>`：声明模型的 `type / alias / protocol / reference_transport / defaults`
+- `protocol` 当前支持 `openai-videos` 与 `unified-video`
+- `reference_transport` 可把本地参考文件先上传到命名的 S3 兼容存储，再将 URL 提供给上游
+- `reference_transports.<name>`：声明可复用的 S3 兼容上传目标
+- `alias` 可将 CLI 中使用的短名称映射到真实模型名
+- 可通过运行时环境变量覆盖 `.env`，例如 `OPENAI_API_KEY=xxx llm chat "hello"`
+- `--model` 会覆盖当前 mode 的默认模型；若该值命中某个 provider 下模型的 `alias`，会自动路由到该真实模型
+
+## 常见工作流
+
+### 1. 总结文档
+
+```bash
+llm chat "总结下面内容" -r article.md -o summary.md
+```
+
+### 2. 基于参考图修正文案
+
+```bash
+llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
+```
+
+### 3. 生成多张图片方案
+
+```bash
+llm image "生成三张海报方案" -n 3 -o poster.jpg
+```
+
+### 4. 转写录音并输出字幕
+
+```bash
+llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
+```
+
+### 5. 创建并恢复视频任务
+
+```bash
+llm video "生成产品展示短片" -r first-frame.jpg --seconds 8 -o demo.mp4
+llm video --resume vid_123 -o demo.mp4
+```
+
+### 6. 继续同一轮对话
+
+```bash
+llm chat "继续上次方案" -s worklog
+llm chat -I -s worklog
+```
+
+## 常见错误
+
+- 把长文本直接硬编码到命令里，而不是用 `@文件`
 - 需要多轮对话却没用 `-s`，导致上下文无法复用
 - 在 YAML 里把 `aspect` 写成未加引号的 `16:9`，被 YAML 误解析
 - 期待 `audio` 自动输出 SRT，但 prompt 没明确要求字幕格式
-- 将环境域名、密钥、账号写入受版本控制文件，而不是放进 `.env`
+- 忘记 `video` 是异步任务，未记录任务 ID
+- 把域名、密钥、账号写进版本控制文件，而不是放进 `.env`
 
-## Package Info
+## 包信息
 
 - PyPI 包名：`shellus-llmcmd`
 - CLI 命令名：`llm`
 - Python 要求：`>=3.10`
+
+## 相关文档
+
+- 开发参考：[`DEVELOPING.md`](./DEVELOPING.md)
