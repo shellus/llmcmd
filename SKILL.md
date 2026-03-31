@@ -451,6 +451,33 @@ reference_transports:
 - 可通过运行时环境变量覆盖 `.env`，例如 `OPENAI_API_KEY=xxx llm chat "hello"`
 - `--model` 会覆盖当前 mode 的默认模型；若该值命中某个 provider 下模型的 `alias`，会自动路由到该真实模型
 
+临时试用额外模型或 URL：
+
+有些场景只想在当前命令里试一个额外模型、临时网关或测试密钥，不希望写入 `~/.llm/.env` 或 `~/.llm/config.yaml`。可以直接在命令前设置运行时环境变量，这些值只对当前这条命令生效，并且优先级高于 `.env`。
+
+```bash
+CHAT_MODEL=gpt-5.4 llm chat "用更强模型重写这段文案"
+IMAGE_MODEL=gemini-2.5-flash-image-preview llm image "生成一张横版海报" -o banner.jpg
+BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test CHAT_MODEL=gpt-5.4 llm chat "输出一句自检文本"
+BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test IMAGE_MODEL=seedream-4.0 llm image "生成产品主图" -o hero.jpg
+```
+
+常用运行时变量：
+
+- `CHAT_MODEL`：覆盖 `chat` 默认模型
+- `IMAGE_MODEL`：覆盖 `image` 默认模型
+- `AUDIO_MODEL`：覆盖 `audio` 默认模型
+- `VIDEO_MODEL`：覆盖 `video` 默认模型
+- `MODEL`：作为通用模型覆盖；未设置 mode 专属变量时生效
+- `BASE_URL`：临时覆盖当前 provider 的 `base_url`
+- `API_KEY`：临时覆盖当前 provider 的 `api_key`
+
+说明：
+
+- 这类覆盖不会修改任何配置文件，命令结束后即失效
+- 如果同时设置了 mode 专属变量和 `MODEL`，优先使用 mode 专属变量
+- `BASE_URL` 与 `API_KEY` 是对当前命令整体生效，不区分 `chat / image / audio / video`
+
 ## 常见工作流
 
 ### 1. 总结文档

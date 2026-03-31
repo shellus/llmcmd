@@ -178,4 +178,5 @@ cli.py
 
 - 项目主文档：[`README.md`](./README.md)
 - Agent 使用手册：[`SKILL.md`](./SKILL.md)
+- 配置说明：[`CONFIGURATION.md`](./CONFIGURATION.md)
 - 历史专题设计文档：[`docs/dev-spec/`](./docs/dev-spec/)

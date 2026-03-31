@@ -219,94 +219,16 @@ llm chat -I -s ./sessions/product-review.jsonl
 ~/.llm/config.yaml
 ```
 
-加载顺序：
+配置来源、优先级、`--model` 解析规则、运行时环境变量覆盖，以及完整示例，见：
 
-1. 先读取 `~/.llm/.env`，将其中变量写入进程环境；若命令启动时已经存在同名环境变量，则保留运行时环境变量
-2. 再读取 `~/.llm/config.yaml`
-3. 解析 YAML 中的 `${ENV_NAME}` 占位符
-4. 命令执行阶段统一从内存中的配置实例读取 provider、model、base_url、api_key、protocol 等字段
+- [CONFIGURATION.md](./CONFIGURATION.md)
 
-`.env` 示例：
+最常见的临时覆盖方式：
 
 ```bash
-OPENAI_API_KEY=your_openai_api_key
-REVERSE_VIDEO_KEY=your_reverse_video_key
-USER_AGENT=curl/8.5.0
+CHAT_MODEL=gpt-5.4 llm chat "用更强模型重写这段文案"
+BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test llm chat "输出一句自检文本"
 ```
-
-`config.yaml` 示例：
-
-```yaml
-default_provider: openai
-concurrency: 4
-
-modes:
-  chat:
-    provider: openai
-    model: gpt-4.1
-  image:
-    provider: openai
-    model: gpt-image-1
-  audio:
-    provider: openai
-    model: gpt-4o-transcribe
-  video:
-    provider: reverse-video
-    model: sora_t2v_turbo
-
-providers:
-  openai:
-    base_url: https://api.openai.com/v1
-    api_key: ${OPENAI_API_KEY}
-    models:
-      gpt-4.1:
-        type: chat
-        alias: chat-default
-      gpt-image-1:
-        type: image
-      gpt-4o-transcribe:
-        type: audio
-
-  reverse-video:
-    base_url: https://your-newapi.example.com/v1
-    api_key: ${REVERSE_VIDEO_KEY}
-    models:
-      sora_t2v_turbo:
-        type: video
-        alias: sora-fast
-        protocol: unified-video
-        reference_transport: aliyun-s3
-        defaults:
-          aspect_ratio: "16:9"
-          size: 720p
-      sora_t2v_pro:
-        type: video
-        alias: sora-pro
-        protocol: unified-video
-        reference_transport: aliyun-s3
-
-reference_transports:
-  aliyun-s3:
-    endpoint: ${ALIYUN_S3_ENDPOINT}
-    bucket: ${ALIYUN_S3_BUCKET}
-    region: ${ALIYUN_S3_REGION}
-    access_key_id: ${ALIYUN_S3_ACCESS_KEY_ID}
-    secret_access_key: ${ALIYUN_S3_SECRET_ACCESS_KEY}
-    public_base_url: ${ALIYUN_S3_PUBLIC_BASE_URL}
-    key_prefix: llmcmd
-```
-
-说明：
-
-- `modes.<mode>` 用于声明每个 CLI mode 默认使用哪个 provider、哪个真实模型
-- `providers.<name>` 用于声明不同上游的 `base_url`、`api_key`
-- `providers.<name>.models.<model_name>` 用于声明上游模型本身的 `type / alias / protocol / reference_transport / defaults`
-- `providers.<name>.models.<model_name>.protocol` 当前支持 `openai-videos` 与 `unified-video`
-- `providers.<name>.models.<model_name>.reference_transport` 可把本地参考文件先上传到命名的 S3 兼容存储，再将 URL 提供给上游
-- `reference_transports.<name>` 用于声明可复用的 S3 兼容上传目标
-- `alias` 可将 CLI 中使用的短名称映射到真实模型名
-- 可通过运行时环境变量覆盖 `.env`，例如 `OPENAI_API_KEY=xxx llm chat "hello"`
-- `--model` 会覆盖当前 mode 的默认模型；若该值命中某个 provider 下模型的 `alias`，会自动路由到该真实模型
 
 ## 包信息
 
@@ -317,4 +239,5 @@ reference_transports:
 ## 相关文档
 
 - AI Agent 入口文档：[SKILL.md](./SKILL.md)
+- 配置说明：[CONFIGURATION.md](./CONFIGURATION.md)
 - 开发参考：[DEVELOPING.md](./DEVELOPING.md)
