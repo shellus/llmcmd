@@ -241,31 +241,26 @@ system_prompt: "你是严谨的处理助手"
 output_dir: outputs
 
 tasks:
-  - id: summary
-    prompt: "总结下面内容"
+  - prompt: "总结下面内容"
     input: article.md
     output: summary.md
 
-  - id: edit-prompt
-    prompt: "把人物脸型改成偏瘦，不要改动其他描述"
+  - prompt: "把人物脸型改成偏瘦，不要改动其他描述"
     edit: 商务女性生图.md
     output: 商务女性生图.v2.md
 
-  - id: hero-image
-    mode: image
+  - mode: image
     prompt: "为产品主页生成三张极简横幅图"
     count: 3
     size: 2K
     aspect: "16:9"
     output: hero.jpg
 
-  - id: transcript
-    mode: audio
+  - mode: audio
     audio_file: meeting.mp3
     prompt: "请输出标准 SRT 字幕"
 
-  - id: promo-video
-    mode: video
+  - mode: video
     prompt: "生成一段产品宣传短片"
     reference:
       - cover.jpg
@@ -278,6 +273,8 @@ tasks:
 
 - 顶层 `mode` 可为任务提供默认模式
 - 单个任务可通过 `mode` 覆盖默认值
+- 如果定义了 `output`，始终以 `output` 为准
+- 图片和视频任务未定义 `output` 时，会按任务序号自动命名为 `image-1.jpg`、`video-2.mp4`
 - `aspect` 建议写成带引号的字符串，例如 `"16:9"`，避免 YAML 误解析
 
 ## 配置

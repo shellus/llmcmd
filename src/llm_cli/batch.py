@@ -1,6 +1,5 @@
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from pathlib import Path
 
 from .config import create_client, get_config_value
@@ -88,7 +87,7 @@ def get_batch_concurrency(modes, configs, yaml_data):
     return value
 
 
-def resolve_task_output(mode, task, output_dir, yaml_dir):
+def resolve_task_output(mode, task, output_dir, yaml_dir, index):
     output = task.get("output")
     if output:
         output_path = Path(output)
@@ -107,16 +106,14 @@ def resolve_task_output(mode, task, output_dir, yaml_dir):
 
     if mode == "image":
         base_dir = Path(output_dir).resolve() if output_dir else (yaml_dir / "gemini-output").resolve()
-        task_id = task.get("id") or f"task_{datetime.now().strftime('%H%M%S_%f')}"
-        return str(base_dir / f"{task_id}.jpg")
+        return str(base_dir / f"image-{index}.jpg")
 
     if mode == "audio":
         audio_path = resolve_path(task["audio_file"], base_dir=yaml_dir)
         return str(audio_path.with_suffix(".srt"))
     if mode == "video":
         base_dir = Path(output_dir).resolve() if output_dir else (yaml_dir / "gemini-output").resolve()
-        task_id = task.get("id") or f"task_{datetime.now().strftime('%H%M%S_%f')}"
-        return str(base_dir / f"{task_id}.mp4")
+        return str(base_dir / f"video-{index}.mp4")
 
     return None
 
@@ -177,7 +174,7 @@ def run_batch(yaml_path_str: str):
         input_paths = normalize_task_input(task.get("input", global_input), index)
         task_spec = {
             "index": index,
-            "id": task.get("id", f"task-{index}"),
+            "task_label": f"{mode}-{index}",
             "mode": mode,
             "prompt": task.get("prompt", global_prompt),
             "system_prompt": task.get("system_prompt", global_system_prompt),
@@ -198,7 +195,7 @@ def run_batch(yaml_path_str: str):
             "config": None,
         }
         validate_task_fields(mode, task_spec, index)
-        task_spec["output"] = resolve_task_output(mode, task, output_dir, yaml_dir)
+        task_spec["output"] = resolve_task_output(mode, task, output_dir, yaml_dir, index)
         prepared.append(task_spec)
         modes.add(mode)
 
@@ -228,14 +225,14 @@ def run_batch(yaml_path_str: str):
         else:
             client, model = clients[task_spec["mode"]]
 
-        task_id = task_spec["id"]
-        print(f"[{task_id}] 开始 | 模型: {model}")
+        task_label = task_spec["task_label"]
+        print(f"[{task_label}] 开始 | 模型: {model}")
 
         def progress(event, **payload):
             if event == "start":
-                print(f"[{task_id}] 开始生成 {payload['total']} 张图片（并发数: {payload['concurrency']}）")
+                print(f"[{task_label}] 开始生成 {payload['total']} 张图片（并发数: {payload['concurrency']}）")
             elif event == "progress":
-                print(f"[{task_id}] [{payload['completed']}/{payload['total']}] 已完成")
+                print(f"[{task_label}] [{payload['completed']}/{payload['total']}] 已完成")
 
         result = task_spec, run_task(
             task_spec["mode"],
@@ -261,7 +258,7 @@ def run_batch(yaml_path_str: str):
             progress_callback=progress if task_spec["mode"] == "image" and task_spec["count"] > 1 else None,
         )
 
-        print(f"[{task_id}] 完成")
+        print(f"[{task_label}] 完成")
         return result
 
     success = 0
@@ -271,21 +268,21 @@ def run_batch(yaml_path_str: str):
         futures = {pool.submit(run_one, spec): spec for spec in prepared}
         for future in as_completed(futures):
             spec = futures[future]
-            task_id = spec["id"]
+            task_label = spec["task_label"]
             try:
                 _, result = future.result()
                 if result["mode"] == "image":
-                    print(f"[{task_id}] 已写入图片: {', '.join(result['output_paths'])}")
+                    print(f"[{task_label}] 已写入图片: {', '.join(result['output_paths'])}")
                 elif result["mode"] == "video":
-                    print(f"[{task_id}] 已写入视频: {', '.join(result['output_paths'])}")
+                    print(f"[{task_label}] 已写入视频: {', '.join(result['output_paths'])}")
                 elif result.get("output_path"):
-                    print(f"[{task_id}] 已写入: {result['output_path']}")
+                    print(f"[{task_label}] 已写入: {result['output_path']}")
                 else:
-                    print(f"[{task_id}]")
+                    print(f"[{task_label}]")
                     print(result["text"])
                 success += 1
             except Exception as exc:
-                print(f"[{task_id}] 错误: {exc}", file=sys.stderr)
+                print(f"[{task_label}] 错误: {exc}", file=sys.stderr)
                 failed += 1
 
     print(f"\n完成！成功 {success}，失败 {failed}")

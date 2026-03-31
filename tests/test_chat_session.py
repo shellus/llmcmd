@@ -542,6 +542,59 @@ tasks:
 
         self.assertEqual(captured["prompt"], "@instruction.md")
 
+    def test_batch_image_task_uses_mode_and_index_for_default_output_name(self):
+        from llm_cli.batch import run_batch
+
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-image-model", {"BASE_URL": "https://example.com/v1"}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["output"] = kwargs["output"]
+            return {"mode": mode, "output_paths": [kwargs["output"]], "printed": False}
+
+        yaml_content = """\
+mode: image
+tasks:
+  - prompt: "生成横版海报"
+"""
+
+        with TemporaryDirectory() as tmp:
+            yaml_path = Path(tmp) / "tasks.yaml"
+            yaml_path.write_text(yaml_content, encoding="utf-8")
+            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                run_batch(str(yaml_path))
+
+        self.assertEqual(captured["output"], str((Path(tmp) / "gemini-output" / "image-1.jpg").resolve()))
+
+    def test_batch_default_output_name_ignores_yaml_id_field(self):
+        from llm_cli.batch import run_batch
+
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-video-model", {"BASE_URL": "https://example.com/v1"}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["output"] = kwargs["output"]
+            return {"mode": mode, "output_paths": [kwargs["output"]], "task_id": "vid_123", "printed": False}
+
+        yaml_content = """\
+mode: video
+tasks:
+  - id: custom-name
+    prompt: "生成产品视频"
+"""
+
+        with TemporaryDirectory() as tmp:
+            yaml_path = Path(tmp) / "tasks.yaml"
+            yaml_path.write_text(yaml_content, encoding="utf-8")
+            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                run_batch(str(yaml_path))
+
+        self.assertEqual(captured["output"], str((Path(tmp) / "gemini-output" / "video-1.mp4").resolve()))
+
     def test_single_chat_with_session_loads_history_and_appends(self):
         with TemporaryDirectory() as tmp:
             session_path = Path(tmp) / "demo.jsonl"
