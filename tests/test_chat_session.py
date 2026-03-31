@@ -1043,6 +1043,11 @@ tasks:
                 "openai": {
                     "base_url": "https://example.com/v1",
                     "api_key": "demo-key",
+                    "models": {
+                        "chat-model": {"type": "chat"},
+                        "image-model": {"type": "image"},
+                        "audio-model": {"type": "audio"},
+                    },
                 }
             },
         }
@@ -1062,6 +1067,9 @@ tasks:
                 "shared": {
                     "base_url": "https://example.com/v1",
                     "api_key": "demo-key",
+                    "models": {
+                        "global-model": {},
+                    },
                 }
             },
         }
