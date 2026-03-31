@@ -193,10 +193,17 @@ def create_video_task(
         body = {
             "model": model,
             "prompt": prompt,
-            "aspect_ratio": request_options.get("aspect_ratio") or mode_defaults.get("aspect_ratio"),
-            "size": size or request_options.get("size") or mode_defaults.get("size"),
             "images": list(reference_urls or []),
         }
+        resolved_seconds = seconds or request_options.get("seconds") or mode_defaults.get("seconds")
+        resolved_size = size or request_options.get("size") or mode_defaults.get("size")
+        resolved_aspect_ratio = request_options.get("aspect_ratio") or mode_defaults.get("aspect_ratio")
+        if resolved_seconds is not None:
+            body["seconds"] = resolved_seconds
+        if resolved_size is not None:
+            body["size"] = resolved_size
+        if resolved_aspect_ratio is not None:
+            body["aspect_ratio"] = resolved_aspect_ratio
         if not body["images"] and input_reference:
             try:
                 body["images"] = [_as_data_url(input_reference)]

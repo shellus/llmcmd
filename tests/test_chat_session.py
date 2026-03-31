@@ -1509,6 +1509,25 @@ providers:
         self.assertEqual(captured["video_seconds"], "10")
         self.assertEqual(captured["video_size"], "1080P")
 
+    def test_video_command_does_not_apply_builtin_defaults(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-video-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["video_seconds"] = kwargs["video_seconds"]
+            captured["video_size"] = kwargs["video_size"]
+            return {"mode": mode, "output_paths": ["/tmp/result.mp4"], "task_id": "vid_123", "printed": False}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["video", "生成测试视频"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIsNone(captured["video_seconds"])
+        self.assertIsNone(captured["video_size"])
+
     def test_video_command_passes_resume_id_to_run_task(self):
         captured = {}
 
@@ -1779,6 +1798,7 @@ providers:
                     client,
                     model="sora-fast-real",
                     prompt="test prompt",
+                    seconds="8",
                     size="720p",
                     input_reference=str(image_path),
                     config=config,
@@ -1787,9 +1807,43 @@ providers:
         self.assertEqual(result["id"], "task-1")
         self.assertEqual(captured["url"], "https://video.example.com/v1/video/create")
         self.assertEqual(captured["content_type"], "application/json")
+        self.assertIn('"seconds": "8"', captured["body"])
         self.assertIn('"aspect_ratio": "16:9"', captured["body"])
         self.assertIn('"size": "720p"', captured["body"])
         self.assertIn('"images": ["data:image/jpeg;base64,', captured["body"])
+
+    def test_create_video_task_omits_empty_unified_protocol_fields(self):
+        from llm_cli.api import create_video_task
+
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"id":"task-1","status":"pending"}'
+
+        def fake_urlopen(request, timeout=300):
+            captured["body"] = request.data.decode("utf-8")
+            return FakeResponse()
+
+        client = SimpleNamespace(base_url="https://video.example.com/v1", api_key="demo-key")
+
+        with patch("llm_cli.api.urllib.request.urlopen", fake_urlopen):
+            create_video_task(
+                client,
+                model="sora-fast-real",
+                prompt="test prompt",
+                config={"mode": {"protocol": "unified-video"}},
+            )
+
+        self.assertNotIn('"seconds":', captured["body"])
+        self.assertNotIn('"size":', captured["body"])
+        self.assertNotIn('"aspect_ratio":', captured["body"])
 
     def test_prepare_reference_resources_uploads_files_to_named_transport(self):
         from llm_cli.reference_transport import prepare_reference_resources
