@@ -441,7 +441,7 @@ reference_transports:
 - `modes.<mode>`：声明每个 CLI mode 默认使用哪个 provider、哪个真实模型
 - `providers.<name>`：声明上游的 `base_url`、`api_key`
 - `providers.<name>.models.<model_name>`：声明模型的 `type / alias / protocol / reference_transport / defaults`
-- `protocol` 当前支持 `openai-videos` 与 `unified-video`
+- `protocol` 当前支持 `openai-chat-completions`、`grok2api-image`、`openai-videos` 与 `unified-video`
 - `reference_transport` 可把本地参考文件先上传到命名的 S3 兼容存储，再将 URL 提供给上游
 - `reference_transports.<name>`：声明可复用的 S3 兼容上传目标
 - `alias` 可将 CLI 中使用的短名称映射到真实模型名

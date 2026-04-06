@@ -62,6 +62,7 @@ def run_task(
     video_size=None,
     resume_task_id=None,
 ):
+    request_model = model
     if messages is None:
         prompt_text = resolve_text(prompt, base_dir=base_dir)
         system_text = resolve_text(system_prompt, base_dir=base_dir)
@@ -90,6 +91,10 @@ def run_task(
         reference_urls = prepared_references["url_references"]
     else:
         reference_urls = []
+    if mode == "image" and reference:
+        configured_edit_model = (config or {}).get("model_config", {}).get("edit_model")
+        if configured_edit_model:
+            request_model = configured_edit_model
     audio_path = None
     if audio_file:
         audio_path = str(resolve_path(audio_file, base_dir=base_dir))
@@ -102,6 +107,8 @@ def run_task(
             input_text=input_text,
             reference_path=reference_path,
             audio_path=audio_path,
+            protocol=((config or {}).get("mode") or {}).get("protocol"),
+            reference_urls=reference_urls,
         )
 
     extra_body = None
@@ -176,19 +183,20 @@ def run_task(
 
     response = api_call(
         client,
-        model,
+        request_model,
         messages,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         stream_handler=stream_handler,
         extra_body=extra_body,
+        config=config,
     )
 
     if mode == "image":
         output_path = output or default_output_path("image")
         output_path = str(resolve_path(output_path, base_dir=base_dir)) if output else output_path
         if image_count == 1:
-            saved_paths = extract_image_result(response, output_path)
+            saved_paths = extract_image_result(response, output_path, config=config)
             return {"mode": mode, "output_paths": saved_paths, "printed": False}
 
         concurrency = get_mode_concurrency("image", config or {})
@@ -199,13 +207,14 @@ def run_task(
         def render_one(index):
             image_response = response if index == 0 else api_call(
                 client,
-                model,
+                request_model,
                 messages,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 extra_body=extra_body,
+                config=config,
             )
-            return extract_image_result(image_response, output_path, image_index=index)
+            return extract_image_result(image_response, output_path, image_index=index, config=config)
 
         saved_paths = []
         completed = 0
@@ -227,7 +236,7 @@ def run_task(
     if mode in {"chat", "text"} and response_has_images(response):
         output_path = output or default_output_path("image")
         output_path = str(resolve_path(output_path, base_dir=base_dir)) if output else output_path
-        saved_paths = extract_image_result(response, output_path)
+        saved_paths = extract_image_result(response, output_path, config=config)
         return {"mode": mode, "output_paths": saved_paths, "printed": False}
 
     text = extract_text_result(response)

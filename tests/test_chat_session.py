@@ -276,6 +276,39 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(content[0]["file"]["filename"], "ref.png")
         self.assertEqual(content[1], {"type": "text", "text": "保留主体重绘"})
 
+    def test_build_messages_grok2api_image_uses_image_url_parts_for_references(self):
+        from llm_cli.messages import build_messages
+
+        with patch("llm_cli.messages.load_binary_attachment") as mock_load:
+            mock_load.return_value = {"path": "/tmp/ref.png", "mime_type": "image/png", "base64_data": "QQ=="}
+            messages = build_messages(
+                "image",
+                prompt="保留主体重绘",
+                reference_path=["/tmp/ref.png"],
+                protocol="grok2api-image",
+            )
+
+        content = messages[0]["content"]
+        self.assertEqual(content[0]["type"], "image_url")
+        self.assertEqual(content[0]["image_url"]["url"], "data:image/png;base64,QQ==")
+        self.assertEqual(content[1], {"type": "text", "text": "保留主体重绘"})
+
+    def test_build_messages_grok2api_image_prefers_uploaded_reference_urls(self):
+        from llm_cli.messages import build_messages
+
+        messages = build_messages(
+            "image",
+            prompt="保留主体重绘",
+            reference_path=["/tmp/ref.png"],
+            protocol="grok2api-image",
+            reference_urls=["https://cdn.example.com/ref.png?sign=1"],
+        )
+
+        content = messages[0]["content"]
+        self.assertEqual(content[0]["type"], "image_url")
+        self.assertEqual(content[0]["image_url"]["url"], "https://cdn.example.com/ref.png?sign=1")
+        self.assertEqual(content[1], {"type": "text", "text": "保留主体重绘"})
+
     def test_debug_logs_include_stream_true(self):
         from llm_cli import api as api_module
 
@@ -341,6 +374,65 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(captured["extra_body"]["modalities"], ["image", "text"])
         self.assertEqual(captured["extra_body"]["image_config"]["image_size"], "2K")
         self.assertEqual(captured["extra_body"]["image_config"]["aspect_ratio"], "16:9")
+
+    def test_api_call_uses_non_stream_for_grok2api_image_protocol(self):
+        from llm_cli.api import api_call
+
+        captured = {}
+
+        def fake_create(**kwargs):
+            captured.update(kwargs)
+            return []
+
+        client = SimpleNamespace(
+            base_url="https://example.com/v1",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create)),
+        )
+
+        api_call(
+            client,
+            "test-model",
+            [{"role": "user", "content": "测试"}],
+            config={"mode": {"protocol": "grok2api-image"}},
+        )
+
+        self.assertFalse(captured["stream"])
+
+    def test_extract_image_result_accepts_content_url_for_grok2api_image(self):
+        from llm_cli.output import extract_image_result
+
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="https://example.com/generated.jpg",
+                        images=None,
+                    )
+                )
+            ]
+        )
+
+        class FakeBinaryResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b"image-bytes"
+
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp) / "result.jpg"
+            with patch("llm_cli.output.urllib.request.urlopen", return_value=FakeBinaryResponse()):
+                paths = extract_image_result(
+                    response,
+                    str(target),
+                    config={"mode": {"protocol": "grok2api-image"}},
+                )
+
+            self.assertEqual(paths, [str(target)])
+            self.assertEqual(target.read_bytes(), b"image-bytes")
 
     def test_video_api_debug_logs_include_request_and_response(self):
         from llm_cli import api as api_module
@@ -1624,7 +1716,47 @@ providers:
         self.assertEqual(settings["provider"]["name"], "cpa")
         self.assertEqual(settings["model"], "foxa/sonnet-4-5-202500929")
         self.assertIsNone(settings["model_config"])
-        self.assertEqual(settings["mode"]["protocol"], "openai_chat")
+        self.assertEqual(settings["mode"]["protocol"], "openai-chat-completions")
+
+    def test_run_task_image_uses_edit_model_when_reference_exists(self):
+        from llm_cli.task import run_task
+
+        captured = {}
+
+        def fake_api_call(client, model, messages, **kwargs):
+            captured["model"] = model
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="https://example.com/result.jpg",
+                            images=None,
+                        )
+                    )
+                ]
+            )
+
+        with patch("llm_cli.task.prepare_reference_resources", return_value={"local_paths": ["/tmp/ref.png"], "url_references": []}), patch(
+            "llm_cli.task.build_messages",
+            return_value=[{"role": "user", "content": "测试"}],
+        ), patch("llm_cli.task.api_call", fake_api_call), patch(
+            "llm_cli.task.extract_image_result",
+            return_value=["/tmp/result.jpg"],
+        ):
+            result = run_task(
+                "image",
+                object(),
+                "grok-imagine-1.0",
+                prompt="背景换成公园广场",
+                reference=["/tmp/ref.png"],
+                config={
+                    "mode": {"protocol": "grok2api-image"},
+                    "model_config": {"edit_model": "grok-imagine-1.0-edit"},
+                },
+            )
+
+        self.assertEqual(captured["model"], "grok-imagine-1.0-edit")
+        self.assertEqual(result["output_paths"], ["/tmp/result.jpg"])
 
     def test_run_task_video_resumes_until_completion_and_downloads(self):
         from llm_cli.task import run_task

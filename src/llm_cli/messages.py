@@ -51,7 +51,25 @@ def _build_text_attachment_part(path):
     return {"type": "text", "text": body}
 
 
-def build_messages(mode, prompt, system_prompt=None, input_text=None, reference_path=None, audio_path=None):
+def _build_remote_image_url_part(url):
+    return {
+        "type": "image_url",
+        "image_url": {
+            "url": url,
+        },
+    }
+
+
+def build_messages(
+    mode,
+    prompt,
+    system_prompt=None,
+    input_text=None,
+    reference_path=None,
+    audio_path=None,
+    protocol=None,
+    reference_urls=None,
+):
     if reference_path is None:
         reference_paths = []
     elif isinstance(reference_path, (list, tuple)):
@@ -107,8 +125,15 @@ def build_messages(mode, prompt, system_prompt=None, input_text=None, reference_
             fail("image 模式至少需要 prompt")
         if reference_paths:
             content = []
-            for path in reference_paths:
-                content.append(_build_file_part(path))
+            if protocol == "grok2api-image" and reference_urls:
+                for url in reference_urls:
+                    content.append(_build_remote_image_url_part(url))
+            else:
+                for path in reference_paths:
+                    if protocol == "grok2api-image" and is_image_attachment(path):
+                        content.append(_build_image_url_part(path))
+                    else:
+                        content.append(_build_file_part(path))
             content.append({"type": "text", "text": message_text})
             messages.append({"role": "user", "content": content})
         else:

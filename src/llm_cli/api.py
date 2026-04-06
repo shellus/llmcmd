@@ -314,7 +314,8 @@ def download_video_content_stream(client, task_id, chunk_size=1024 * 256, config
             yield chunk
 
 
-def api_call(client, model, messages, temperature=None, max_output_tokens=None, stream_handler=None, extra_body=None):
+def api_call(client, model, messages, temperature=None, max_output_tokens=None, stream_handler=None, extra_body=None, config=None):
+    protocol = ((config or {}).get("mode") or {}).get("protocol") or "openai-chat-completions"
     kwargs = {
         "model": model,
         "messages": messages,
@@ -327,7 +328,7 @@ def api_call(client, model, messages, temperature=None, max_output_tokens=None, 
         kwargs["max_tokens"] = max_output_tokens
     if extra_body:
         kwargs["extra_body"] = extra_body
-    kwargs["stream"] = True
+    kwargs["stream"] = protocol != "grok2api-image"
 
     if DEBUG:
         debug_kwargs = sanitize_debug_value(kwargs)
@@ -336,6 +337,17 @@ def api_call(client, model, messages, temperature=None, max_output_tokens=None, 
         debug_log("请求参数:", json.dumps(debug_kwargs, ensure_ascii=False, indent=2))
 
     stream = client.chat.completions.create(**kwargs)
+
+    if not kwargs["stream"]:
+        if hasattr(stream, "choices"):
+            return stream
+        try:
+            collected = list(stream)
+        except TypeError:
+            return stream
+        if collected and hasattr(collected[-1], "choices"):
+            return SimpleNamespace(choices=[SimpleNamespace(message=collected[-1].choices[0].message)])
+        return _finalize_stream_response([], [], [])
 
     content_parts = []
     image_parts = []

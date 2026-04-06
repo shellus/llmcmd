@@ -199,8 +199,17 @@ llm chat "你好，输出一句测试文本"
 
 当前 `protocol` 支持：
 
+- `openai-chat-completions`
+- `grok2api-image`
 - `openai-videos`
 - `unified-video`
+
+说明：
+
+- `openai-chat-completions`：通过 `POST /v1/chat/completions` 承载 `chat / image / audio`
+- `grok2api-image`：图片模式专用变体，仍走 `POST /v1/chat/completions`，但参考图按 `image_url` 发送，结果优先从 `message.content` 提取图片 URL
+- `openai-videos`：视频模式走 `POST /v1/videos`
+- `unified-video`：视频模式走兼容网关的统一视频接口
 
 ## 运行时环境变量覆盖
 

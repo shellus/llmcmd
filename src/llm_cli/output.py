@@ -54,9 +54,20 @@ def image_output_path(output_path, index):
     return output_path if index == 0 else output_path.with_stem(f"{output_path.stem}_{index}")
 
 
-def extract_image_result(response, output_path, image_index=0):
+def _extract_image_urls_from_content(content):
+    if not content:
+        return []
+    markdown_urls = re.findall(r"!\[.*?\]\((https?://[^\s)]+)\)", str(content))
+    if markdown_urls:
+        return markdown_urls
+    direct_urls = re.findall(r"https?://[^\s\"'<>]+(?:png|jpg|jpeg|webp)(?:\?[^\s\"'<>]*)?", str(content), flags=re.IGNORECASE)
+    return direct_urls
+
+
+def extract_image_result(response, output_path, image_index=0, config=None):
     message = response.choices[0].message
     output_path = Path(output_path)
+    protocol = ((config or {}).get("mode") or {}).get("protocol") or "openai-chat-completions"
 
     images = getattr(message, "images", None)
     if images:
@@ -75,7 +86,9 @@ def extract_image_result(response, output_path, image_index=0):
     content = getattr(message, "content", None) or ""
     if isinstance(content, list):
         content = extract_text_result(response)
-    img_urls = re.findall(r"!\[.*?\]\((https?://[^\s)]+)\)", str(content))
+    img_urls = _extract_image_urls_from_content(content) if protocol == "grok2api-image" else re.findall(
+        r"!\[.*?\]\((https?://[^\s)]+)\)", str(content)
+    )
     if img_urls:
         saved_paths = []
         output_path.parent.mkdir(parents=True, exist_ok=True)

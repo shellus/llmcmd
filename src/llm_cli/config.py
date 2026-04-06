@@ -178,6 +178,14 @@ def _runtime_model_override(mode):
     return None
 
 
+def _default_protocol_for_mode(mode):
+    if mode == "video":
+        return "openai-videos"
+    if mode in {"chat", "image", "audio"}:
+        return "openai-chat-completions"
+    return f"openai-{mode}"
+
+
 def resolve_mode_settings(mode, config, explicit_model=None):
     mode = _normalize_mode(mode)
     providers = config.get("providers") or {}
@@ -234,9 +242,10 @@ def resolve_mode_settings(mode, config, explicit_model=None):
     mode_settings = {
         "name": mode,
         "provider": provider_name,
-        "protocol": (model_config or {}).get("protocol") or global_mode.get("protocol") or provider_mode.get("protocol") or (
-            "openai-videos" if mode == "video" else f"openai_{mode}"
-        ),
+        "protocol": (model_config or {}).get("protocol")
+        or global_mode.get("protocol")
+        or provider_mode.get("protocol")
+        or _default_protocol_for_mode(mode),
         "model": model,
         "concurrency": (model_config or {}).get("concurrency") or global_mode.get("concurrency") or provider_mode.get("concurrency") or config.get("concurrency"),
         "reference_transport": (model_config or {}).get("reference_transport") or global_mode.get("reference_transport") or provider_mode.get("reference_transport"),
