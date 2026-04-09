@@ -8,6 +8,7 @@ from . import api
 from .batch import run_batch
 from .config import create_client
 from .interactive import run_interactive_chat
+from .pi_agent import THINKING_LEVELS, default_pi_agent_dir, run_pi_agent
 from .session import append_session_messages, load_session_messages, replace_leading_system_messages, resolve_session_path, rewrite_session_messages
 from .task import run_task
 from .utils import IMAGE_ASPECT_CHOICES, IMAGE_SIZE_CHOICES, fail, resolve_text
@@ -165,7 +166,7 @@ def _run_chat_once(
 @click.group(context_settings=dict(help_option_names=["-h", "--help"]))
 @click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
 def cli():
-    """统一 LLM CLI：chat / image / audio / batch。"""
+    """统一 LLM CLI：chat / agent / image / audio / video / batch。"""
     pass
 
 
@@ -383,6 +384,58 @@ def audio(prompt, audio_file, system, output, model, temperature, max_output_tok
         print(f"已写入: {result['output_path']}")
     elif not result.get("already_streamed"):
         _render_text_result(result)
+
+
+@cli.command(
+    epilog="""\b
+使用示例:
+  llm agent
+  llm agent "审查当前仓库里最危险的改动"
+  llm agent --model qwen3-coder --thinking high
+  llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
+"""
+)
+@click.argument("prompt", required=False, default=None, metavar="[PROMPT|@FILE]")
+@click.option("--system", default=None, help="透传为 pi 的 system prompt，可使用 @文件路径 从文件读取")
+@click.option("--model", default=None, help="覆盖当前 chat 模式模型，并作为 pi 自定义 provider 的模型名")
+@click.option(
+    "--thinking",
+    type=click.Choice(THINKING_LEVELS),
+    default=None,
+    help="透传给 pi 的 thinking 级别；设置为非 off 时默认把模型标记为 reasoning",
+)
+@click.option("--reasoning/--no-reasoning", default=None, help="显式指定生成到 pi models.json 的 reasoning 标记")
+@click.option("--pi-bin", default="pi", show_default=True, help="pi 可执行文件路径")
+@click.option(
+    "--pi-agent-dir",
+    default=str(default_pi_agent_dir()),
+    show_default=True,
+    help="pi 运行目录；会在其中写入 models.json",
+)
+@click.option("--session", "pi_session", default=None, help="透传给 pi 的会话文件或会话 ID")
+@click.option("--session-dir", "pi_session_dir", default=None, help="透传给 pi 的 session 存储目录")
+@click.option("--no-session", is_flag=True, help="透传给 pi，禁用会话持久化")
+@click.option("--tools", default=None, help="透传给 pi 的工具列表，例如 read,bash,edit,write")
+@click.option("--no-tools", is_flag=True, help="透传给 pi，禁用内置工具")
+@click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
+def agent(prompt, system, model, thinking, reasoning, pi_bin, pi_agent_dir, pi_session, pi_session_dir, no_session, tools, no_tools):
+    """启动 pi coding agent，并复用当前 llmcmd 的 chat 配置。"""
+    _, resolved_model, config = create_client("chat", explicit_model=model)
+    run_pi_agent(
+        config=config,
+        resolved_model=resolved_model,
+        prompt=prompt,
+        system_prompt=system,
+        pi_bin=pi_bin,
+        agent_dir=pi_agent_dir,
+        session=pi_session,
+        session_dir=pi_session_dir,
+        no_session=no_session,
+        tools=tools,
+        no_tools=no_tools,
+        thinking=thinking,
+        reasoning=reasoning,
+    )
 
 
 @cli.command(

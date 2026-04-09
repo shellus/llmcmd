@@ -36,6 +36,7 @@ llm
 | 模式 | 用途 | 常用输入 | 常用输出 |
 |------|------|----------|----------|
 | `llm chat` | 文本生成、分析、问答、改写、编辑文件、持久对话 | prompt、`@文件`、`-r` 附件、会话文件 | stdout、文本文件、会话文件 |
+| `llm agent` | 启动 `pi` coding agent，并复用当前 `chat` 配置 | prompt、`--thinking`、`--session`、`--tools` | `pi` 交互会话 |
 | `llm image` | 图片生成、参考图编辑 | prompt、`@文件`、`-r` 附件 | 图片文件 |
 | `llm audio` | 音频转写、总结、字幕 | prompt、音频附件 | stdout、文本文件、字幕文件 |
 | `llm video` | 异步视频生成、恢复等待、自动下载 | prompt、首帧参考图、任务 ID | 视频文件 |
@@ -148,6 +149,29 @@ llm chat -I -s ./sessions/product-review.jsonl
 
 - 非交互 `chat` 会实时把流式文本写到 stdout
 - 若 `chat` 使用图片模型并返回图片，会自动落盘并显示图片路径
+
+## `llm agent`
+
+用于启动外部 `pi` coding agent，并复用当前 `llmcmd` 的 `chat` 模型、`BASE_URL` 与 `API_KEY` 配置。
+
+### 基本示例
+
+```bash
+llm agent
+llm agent "审查当前仓库里最危险的改动"
+llm agent --model qwen3-coder --thinking high
+llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
+```
+
+### 说明
+
+- 这是独立入口，不替换现有 `chat -I`
+- 运行时会在 `~/.llm/pi-agent/` 下生成 `pi` 所需的 `models.json`
+- `models.json` 只写 `base_url` 与 API key 的环境变量名，真实 key 通过子进程环境变量注入
+- `agent` 当前使用 `chat` 模式配置作为上游来源
+- `--thinking` 会透传给 `pi`；当值不是 `off` 时，默认把该模型标记为 reasoning
+- `--pi-bin` 可指定 `pi` 可执行文件路径
+- `--session`、`--session-dir`、`--no-session`、`--tools`、`--no-tools` 会原样透传给 `pi`
 
 ## `llm image`
 

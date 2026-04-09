@@ -831,6 +831,64 @@ tasks:
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(captured["system_prompt"], "系统设定")
 
+    def test_agent_command_delegates_to_pi_runner(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "agent-model", {"provider": {"base_url": "https://example.com/v1", "api_key": "demo-key"}}
+
+        def fake_run_pi_agent(**kwargs):
+            captured.update(kwargs)
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_pi_agent", fake_run_pi_agent):
+            result = runner.invoke(
+                cli,
+                [
+                    "agent",
+                    "检查当前仓库",
+                    "--system",
+                    "系统设定",
+                    "--thinking",
+                    "high",
+                    "--pi-bin",
+                    "/usr/local/bin/pi",
+                    "--pi-agent-dir",
+                    "/tmp/pi-agent",
+                    "--session",
+                    "./pi-session.jsonl",
+                    "--tools",
+                    "read,grep,find,ls",
+                ],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["resolved_model"], "agent-model")
+        self.assertEqual(captured["prompt"], "检查当前仓库")
+        self.assertEqual(captured["system_prompt"], "系统设定")
+        self.assertEqual(captured["thinking"], "high")
+        self.assertEqual(captured["pi_bin"], "/usr/local/bin/pi")
+        self.assertEqual(captured["agent_dir"], "/tmp/pi-agent")
+        self.assertEqual(captured["session"], "./pi-session.jsonl")
+        self.assertEqual(captured["tools"], "read,grep,find,ls")
+
+    def test_agent_command_accepts_no_session_and_no_tools(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "agent-model", {"provider": {"base_url": "https://example.com/v1", "api_key": "demo-key"}}
+
+        def fake_run_pi_agent(**kwargs):
+            captured.update(kwargs)
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_pi_agent", fake_run_pi_agent):
+            result = runner.invoke(cli, ["agent", "--no-session", "--no-tools"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertTrue(captured["no_session"])
+        self.assertTrue(captured["no_tools"])
+
     def test_single_chat_with_session_replaces_leading_system_messages(self):
         with TemporaryDirectory() as tmp:
             session_path = Path(tmp) / "demo.jsonl"
@@ -1717,6 +1775,84 @@ providers:
         self.assertEqual(settings["model"], "foxa/sonnet-4-5-202500929")
         self.assertIsNone(settings["model_config"])
         self.assertEqual(settings["mode"]["protocol"], "openai-chat-completions")
+
+    def test_build_pi_models_config_uses_env_var_for_api_key(self):
+        from llm_cli.pi_agent import build_pi_models_config
+
+        config = build_pi_models_config(
+            base_url="https://example.com/v1",
+            model="demo-model",
+            reasoning=True,
+        )
+
+        provider = config["providers"]["llmcmd"]
+        self.assertEqual(provider["baseUrl"], "https://example.com/v1")
+        self.assertEqual(provider["api"], "openai-completions")
+        self.assertEqual(provider["apiKey"], "LLMCMD_PI_API_KEY")
+        self.assertEqual(provider["models"][0]["id"], "demo-model")
+        self.assertTrue(provider["models"][0]["reasoning"])
+
+    def test_build_pi_command_includes_requested_runtime_flags(self):
+        from llm_cli.pi_agent import build_pi_command
+
+        command = build_pi_command(
+            pi_bin="pi",
+            model="demo-model",
+            prompt="分析当前仓库",
+            system_prompt="系统设定",
+            thinking="medium",
+            session="./agent.jsonl",
+            session_dir="/tmp/pi-sessions",
+            tools="read,bash,edit,write",
+        )
+
+        self.assertEqual(
+            command,
+            [
+                "pi",
+                "--provider",
+                "llmcmd",
+                "--model",
+                "llmcmd/demo-model",
+                "--system-prompt",
+                "系统设定",
+                "--thinking",
+                "medium",
+                "--session",
+                "./agent.jsonl",
+                "--session-dir",
+                "/tmp/pi-sessions",
+                "--tools",
+                "read,bash,edit,write",
+                "分析当前仓库",
+            ],
+        )
+
+    def test_build_pi_environment_sets_agent_dir_and_runtime_key(self):
+        from llm_cli.pi_agent import build_pi_environment
+
+        env = build_pi_environment(agent_dir="/tmp/pi-agent", api_key="demo-key")
+
+        self.assertEqual(env["LLMCMD_PI_API_KEY"], "demo-key")
+        self.assertEqual(env["PI_CODING_AGENT_DIR"], str(Path("/tmp/pi-agent").resolve()))
+        self.assertEqual(env["PI_SKIP_VERSION_CHECK"], "1")
+
+    def test_ensure_pi_models_json_writes_provider_config(self):
+        from llm_cli.pi_agent import ensure_pi_models_json
+
+        with TemporaryDirectory() as tmp:
+            models_path = ensure_pi_models_json(
+                agent_dir=tmp,
+                base_url="https://example.com/v1",
+                model="demo-model",
+                reasoning=True,
+            )
+
+            data = models_path.read_text(encoding="utf-8")
+            self.assertIn('"baseUrl": "https://example.com/v1"', data)
+            self.assertIn('"apiKey": "LLMCMD_PI_API_KEY"', data)
+            self.assertIn('"id": "demo-model"', data)
+            self.assertIn('"reasoning": true', data)
 
     def test_run_task_image_uses_edit_model_when_reference_exists(self):
         from llm_cli.task import run_task

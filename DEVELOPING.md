@@ -31,6 +31,7 @@
 ```text
 cli.py
   -> config.py
+  -> pi_agent.py
   -> task.py
   -> messages.py / api.py
   -> output.py
@@ -42,6 +43,8 @@ cli.py
   负责命令入口、参数定义和基础校验
 - `src/llm_cli/config.py`
   负责读取 `~/.llm/{.env,config.yaml}`，构建运行时配置实例，创建 OpenAI 客户端，并解析 provider、模型与并发配置
+- `src/llm_cli/pi_agent.py`
+  负责把当前 `chat` 配置桥接为 `pi` 可消费的 `models.json` 与启动参数
 - `src/llm_cli/task.py`
   负责统一组织一次任务执行，把 CLI 参数转成消息或请求级元数据，再调用上游
 - `src/llm_cli/messages.py`
@@ -69,6 +72,17 @@ cli.py
 - 保持配置入口统一
 - 复用同一套流式处理与输出提取逻辑
 - 让后端兼容层承担 provider 协议转换
+
+### `agent` 是桥接能力，不是 `chat -I` 的替代实现
+
+`llm agent` 当前是对外部 `pi` coding agent 的桥接入口。
+
+实现时保持以下边界：
+
+- 不要把 `chat -I` 直接替换成 `pi`
+- `agent` 复用当前 `chat` 模式的 `base_url`、`api_key` 与模型名
+- `agent` 的会话格式、工具语义和交互行为由 `pi` 自己负责，不与 `session.py` 的 JSONL 兼容性绑定
+- 真实 API key 只通过子进程环境变量传递，不写入 `models.json`
 
 ### 消息内容和请求级元数据要分开
 

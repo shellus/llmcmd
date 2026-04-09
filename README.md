@@ -10,12 +10,13 @@
 - 用 YAML 一次编排多条 chat / image / audio / video 任务
 - 直接在终端里按要求编辑文本文件
 - 用 JSONL 持久化 `chat` 会话，并在终端里连续对话
+- 直接桥接 `pi` coding agent，复用当前 `llmcmd` 的网关配置
 
 如果你希望把 LLM 能力稳定地接进 shell 脚本、自动化任务、个人工具链，而不是在多个网页和客户端之间切换，`shellus-llmcmd` 就是为这种场景准备的。
 
 ## 为什么用它
 
-- **一个命令统一入口**：`chat`、`image`、`audio`、`batch`
+- **一个命令统一入口**：`chat`、`agent`、`image`、`audio`、`batch`
 - **终端友好**：天然适合 shell、cron、CI、脚本拼装
 - **文件编辑能力**：`chat --edit` 直接按要求改文件
 - **多图生成能力**：`image -n` 支持数量控制、并发控制和轻量进度输出
@@ -44,6 +45,7 @@ llm chat @prompt.txt -o result.md
 llm chat "总结重点" -r article.md -r notes.pdf
 llm chat "继续上一轮结论" -s worklog
 llm chat -I -s worklog
+llm agent "审查当前仓库里最危险的改动"
 ```
 
 ### 2. 直接修改文件
@@ -178,6 +180,28 @@ llm chat -I -s ./sessions/product-review.jsonl
 - `chat` / `image` / `audio` 当前统一通过流式请求收集结果
 - 非交互 `chat` 与 `audio` 会实时把流式文本写到 stdout
 - 若 `chat` 使用图片模型并返回图片，会自动落盘并显示图片路径
+
+### `llm agent`
+用于启动外部 `pi` coding agent，但复用当前 `llmcmd` 的 `chat` 模型、`BASE_URL` 与 `API_KEY` 配置。
+
+示例：
+
+```bash
+llm agent
+llm agent "审查当前仓库里最危险的改动"
+llm agent --model qwen3-coder --thinking high
+llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
+```
+
+说明：
+
+- 这是独立的 agent 入口，不替换 `chat -I`
+- 运行时会在 `~/.llm/pi-agent/` 下生成 `pi` 所需的 `models.json`
+- `models.json` 只写 `base_url` 与 API key 的环境变量名，真实 key 通过子进程环境变量注入
+- `--thinking` 会透传给 `pi`；当值不是 `off` 时，默认把该模型标记为 reasoning
+- `--pi-bin` 可指定 `pi` 可执行文件路径
+- `--session`、`--session-dir`、`--no-session`、`--tools`、`--no-tools` 会原样透传给 `pi`
+- `agent` 当前使用 `chat` 模式配置作为上游来源；如需切换网关或 key，仍通过 `~/.llm/.env`、`~/.llm/config.yaml` 或运行时环境变量覆盖
 
 ### `llm image`
 用于图片生成或参考图编辑，支持 `-n/--count` 多图生成。`-r/--reference` 用于上传附件，当前统一走 `type=file`。
