@@ -146,7 +146,17 @@ def _resolve_provider_model(provider, mode, requested_model=None):
     return None, None
 
 
-def _resolve_provider_for_model(mode, explicit_model, config):
+def _resolve_provider_for_model(mode, explicit_model, config, provider_name=None):
+    if provider_name:
+        provider = dict(((config.get("providers") or {}).get(provider_name)) or {})
+        if not provider:
+            fail(f"{mode} 模式引用了不存在的 provider: {provider_name}")
+        provider["name"] = provider_name
+        model_name, model_config = _resolve_provider_model(provider, mode, explicit_model)
+        if model_name:
+            return provider_name, model_name, model_config
+        return provider_name, explicit_model, None
+
     matches = []
     for provider_name, provider in (config.get("providers") or {}).items():
         provider_copy = dict(provider or {})
@@ -186,12 +196,12 @@ def _default_protocol_for_mode(mode):
     return f"openai-{mode}"
 
 
-def resolve_mode_settings(mode, config, explicit_model=None):
+def resolve_mode_settings(mode, config, explicit_model=None, explicit_provider=None):
     mode = _normalize_mode(mode)
     providers = config.get("providers") or {}
     global_mode = dict((config.get("modes") or {}).get(mode) or {})
 
-    provider_name = global_mode.get("provider") or config.get("default_provider")
+    provider_name = explicit_provider or global_mode.get("provider") or config.get("default_provider")
     model = global_mode.get("model") or config.get("default_model")
     model_config = None
     runtime_model = _runtime_model_override(mode)
@@ -199,7 +209,12 @@ def resolve_mode_settings(mode, config, explicit_model=None):
         model = runtime_model
 
     if explicit_model:
-        matched_provider, mapped_model, matched_model_config = _resolve_provider_for_model(mode, explicit_model, config)
+        matched_provider, mapped_model, matched_model_config = _resolve_provider_for_model(
+            mode,
+            explicit_model,
+            config,
+            provider_name=explicit_provider,
+        )
         if matched_provider:
             provider_name = matched_provider
             model = mapped_model
@@ -302,9 +317,9 @@ def get_mode_concurrency(mode, config, default=4):
     return value
 
 
-def create_client(mode, explicit_model=None):
+def create_client(mode, explicit_model=None, explicit_provider=None):
     runtime = load_runtime_config()
-    resolved = resolve_mode_settings(mode, runtime, explicit_model=explicit_model)
+    resolved = resolve_mode_settings(mode, runtime, explicit_model=explicit_model, explicit_provider=explicit_provider)
     client = OpenAI(
         api_key=resolved["provider"]["api_key"],
         base_url=resolved["provider"]["base_url"],

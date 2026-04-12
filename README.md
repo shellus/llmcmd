@@ -166,6 +166,8 @@ llm chat -I -s ./sessions/product-review.jsonl
 
 说明：
 
+- `--provider` 可临时覆盖当前 chat 模式使用的 provider
+- `--model` 与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名，未命中时直接按原始模型名发送
 - `-s product-review` 会落盘到当前目录下的 `product-review.jsonl`
 - 单次模式和 `-I -s ...` 交互模式可共享同一个会话文件，随时切换继续
 - `llm chat -I "首轮问题"` 会先发送这条首轮消息，再进入连续对话
@@ -195,6 +197,8 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 
 说明：
 
+- `--provider` 可临时覆盖当前 agent 复用的 chat provider
+- `--model` 与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名，未命中时直接按原始模型名发送
 - 这是独立的 agent 入口，不替换 `chat -I`
 - 运行时会在 `~/.llm/pi-agent/` 下生成 `pi` 所需的 `models.json`
 - `models.json` 只写 `base_url` 与 API key 的环境变量名，真实 key 通过子进程环境变量注入
@@ -204,10 +208,12 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 - `agent` 当前使用 `chat` 模式配置作为上游来源；如需切换网关或 key，仍通过 `~/.llm/.env`、`~/.llm/config.yaml` 或运行时环境变量覆盖
 
 ### `llm image`
-用于图片生成或参考图编辑，支持 `-n/--count` 多图生成。`-r/--reference` 用于上传附件，当前统一走 `type=file`。
+用于图片生成或参考图编辑，支持 `-n/--count` 多图生成。`-r/--reference` 用于提供参考附件；默认按 `type=file` 发送，但当配置了 `reference_transport` 且参考图已预上传为 URL 时，会优先按 `image_url` 发送图片引用。
 
 补充说明：
 
+- `--provider` 可临时覆盖当前 image 模式使用的 provider
+- `--model` 可临时覆盖当前 image 模式使用的模型；与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名，未命中时直接按原始模型名发送
 - `--size` 支持 `512 / 1K / 2K / 4K`
 - `--aspect` 支持 `1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9`
 - `--size` 和 `--aspect` 的实际生效情况取决于你所使用的图片后端
@@ -216,11 +222,18 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 ### `llm audio`
 用于把音频送入模型处理，位置参数是 prompt，`-r/--reference` 上传音频附件；默认实时输出到 stdout，仅在传 `-o` 时写文件。若要 SRT，请直接在 prompt 中明确要求。
 
+补充说明：
+
+- `--provider` 可临时覆盖当前 audio 模式使用的 provider
+- `--model` 与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名，未命中时直接按原始模型名发送
+
 ### `llm video`
 用于异步视频生成。默认会创建任务、等待完成并自动下载，也支持通过 `--resume <task_id>` 恢复等待并下载。
 
 补充说明：
 
+- `--provider` 可临时覆盖当前 video 模式使用的 provider
+- `--model` 与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名，未命中时直接按原始模型名发送
 - `--seconds` 支持 `4 / 8 / 12 / 16 / 20`
 - `--size` 当前支持 `720x1280 / 1280x720 / 1024x1024`
 - `-r/--reference` 当前仅取第一张图作为 `input_reference`
@@ -231,6 +244,7 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 
 补充说明：
 
+- `--provider` 可统一覆盖 batch 内各任务默认使用的 provider
 - 如果定义了 `output`，始终以 `output` 为准
 - 图片和视频任务未定义 `output` 时，会按任务序号自动命名为 `image-1.jpg`、`video-2.mp4`
 

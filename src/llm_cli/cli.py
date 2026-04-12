@@ -84,6 +84,13 @@ def _stream_to_stdout(chunk):
     sys.stdout.flush()
 
 
+def _create_client_for_mode(mode, *, model=None, provider=None):
+    kwargs = {"explicit_model": model}
+    if provider:
+        kwargs["explicit_provider"] = provider
+    return create_client(mode, **kwargs)
+
+
 def _request_messages(messages):
     return [{"role": message["role"], "content": message.get("content", "")} for message in messages]
 
@@ -188,12 +195,13 @@ def cli():
 @click.option("--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
 @click.option("-I", "--interactive", is_flag=True, help="进入交互式连续对话；仅在配合 -s 时持久化")
 @click.option("-o", "--output", default=None, help="输出路径；edit 模式下不传则直接覆盖原文件")
+@click.option("--provider", default=None, help="覆盖当前 chat mode 的 provider")
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--probe-input", is_flag=True, hidden=True, help="调试交互式输入事件")
 @click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
-def chat(prompt, reference, edit_path, session_name, system, interactive, output, model, temperature, max_output_tokens, probe_input):
+def chat(prompt, reference, edit_path, session_name, system, interactive, output, provider, model, temperature, max_output_tokens, probe_input):
     """对话/文本生成。
 
     PROMPT 支持直接传字面量，也支持使用 @文件路径 从文件读取。
@@ -204,7 +212,7 @@ def chat(prompt, reference, edit_path, session_name, system, interactive, output
         fail("chat edit 模式需要提供修改要求 prompt")
     if interactive and output:
         fail("交互式对话不支持 --output")
-    client, resolved_model, _ = create_client("chat", explicit_model=model)
+    client, resolved_model, _ = _create_client_for_mode("chat", model=model, provider=provider)
     session_path = resolve_session_path(session_name, interactive=interactive) if session_name is not None else None
     if interactive:
         run_interactive_chat(
@@ -253,11 +261,12 @@ def chat(prompt, reference, edit_path, session_name, system, interactive, output
 @click.option("-n", "--count", type=int, default=1, show_default=True, help="生成数量；会遵循 image 模式并发配置")
 @click.option("--size", "image_size", type=click.Choice(IMAGE_SIZE_CHOICES), default=None, help="图片分辨率档位：512 / 1K / 2K / 4K")
 @click.option("--aspect", "image_aspect_ratio", type=click.Choice(IMAGE_ASPECT_CHOICES), default=None, help="图片宽高比，例如 1:1 / 16:9 / 9:16")
+@click.option("--provider", default=None, help="覆盖当前 image mode 的 provider")
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
-def image(prompt, reference, system, output, count, image_size, image_aspect_ratio, model, temperature, max_output_tokens):
+def image(prompt, reference, system, output, count, image_size, image_aspect_ratio, provider, model, temperature, max_output_tokens):
     """图片生成或参考图编辑。
 
     PROMPT 为必填，支持直接传字面量，也支持使用 @文件路径 从文件读取。
@@ -269,7 +278,7 @@ def image(prompt, reference, system, output, count, image_size, image_aspect_rat
         fail("image 子命令需要 prompt")
     if count <= 0:
         fail("image 子命令的 count 必须大于 0")
-    client, resolved_model, config = create_client("image", explicit_model=model)
+    client, resolved_model, config = _create_client_for_mode("image", model=model, provider=provider)
     result = _run_safely(
         run_task,
         "image",
@@ -305,11 +314,12 @@ def image(prompt, reference, system, output, count, image_size, image_aspect_rat
 @click.option("--seconds", default=None, help="视频时长秒数；仅在显式传入时透传给上游")
 @click.option("--size", "video_size", default=None, help="视频分辨率；仅在显式传入时透传给上游")
 @click.option("--resume", "resume_task_id", default=None, help="跳过创建，按任务 ID 恢复等待并下载")
+@click.option("--provider", default=None, help="覆盖当前 video mode 的 provider")
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="预留参数；当前 video 模式暂不使用")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="预留参数；当前 video 模式暂不使用")
 @click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
-def video(prompt, reference, system, output, seconds, video_size, resume_task_id, model, temperature, max_output_tokens):
+def video(prompt, reference, system, output, seconds, video_size, resume_task_id, provider, model, temperature, max_output_tokens):
     """异步视频生成，默认等待完成并自动下载。"""
     if system:
         fail("video 子命令当前暂不支持 --system")
@@ -319,7 +329,7 @@ def video(prompt, reference, system, output, seconds, video_size, resume_task_id
         fail("video 子命令使用 --resume 时不能再传 -r/--reference")
     if not resume_task_id and not prompt:
         fail("video 子命令需要 prompt，或使用 --resume")
-    client, resolved_model, config = create_client("video", explicit_model=model)
+    client, resolved_model, config = _create_client_for_mode("video", model=model, provider=provider)
     result = _run_safely(
         run_task,
         "video",
@@ -353,17 +363,18 @@ def video(prompt, reference, system, output, seconds, video_size, resume_task_id
 @click.option("-r", "--reference", "audio_file", required=True, help="音频文件路径")
 @click.option("-s", "--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
 @click.option("-o", "--output", default=None, help="输出路径")
+@click.option("--provider", default=None, help="覆盖当前 audio mode 的 provider")
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
 @click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
 @click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
-def audio(prompt, audio_file, system, output, model, temperature, max_output_tokens):
+def audio(prompt, audio_file, system, output, provider, model, temperature, max_output_tokens):
     """音频转录为文本或 SRT。
 
     PROMPT 支持直接传字面量，也支持使用 @文件路径 从文件读取。
     音频文件通过 -r/--reference 传入。
     """
-    client, resolved_model, _ = create_client("audio", explicit_model=model)
+    client, resolved_model, _ = _create_client_for_mode("audio", model=model, provider=provider)
     result = _run_safely(
         run_task,
         "audio",
@@ -397,6 +408,7 @@ def audio(prompt, audio_file, system, output, model, temperature, max_output_tok
 )
 @click.argument("prompt", required=False, default=None, metavar="[PROMPT|@FILE]")
 @click.option("--system", default=None, help="透传为 pi 的 system prompt，可使用 @文件路径 从文件读取")
+@click.option("--provider", default=None, help="覆盖当前 chat mode 的 provider，并复用到 pi 上游配置")
 @click.option("--model", default=None, help="覆盖当前 chat 模式模型，并作为 pi 自定义 provider 的模型名")
 @click.option(
     "--thinking",
@@ -418,9 +430,9 @@ def audio(prompt, audio_file, system, output, model, temperature, max_output_tok
 @click.option("--tools", default=None, help="透传给 pi 的工具列表，例如 read,bash,edit,write")
 @click.option("--no-tools", is_flag=True, help="透传给 pi，禁用内置工具")
 @click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
-def agent(prompt, system, model, thinking, reasoning, pi_bin, pi_agent_dir, pi_session, pi_session_dir, no_session, tools, no_tools):
+def agent(prompt, system, provider, model, thinking, reasoning, pi_bin, pi_agent_dir, pi_session, pi_session_dir, no_session, tools, no_tools):
     """启动 pi coding agent，并复用当前 llmcmd 的 chat 配置。"""
-    _, resolved_model, config = create_client("chat", explicit_model=model)
+    _, resolved_model, config = _create_client_for_mode("chat", model=model, provider=provider)
     run_pi_agent(
         config=config,
         resolved_model=resolved_model,
@@ -445,14 +457,15 @@ def agent(prompt, system, model, thinking, reasoning, pi_bin, pi_agent_dir, pi_s
 """
 )
 @click.argument("yaml_path", metavar="YAML_PATH")
+@click.option("--provider", default=None, help="覆盖 batch 内各任务默认使用的 provider")
 @click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
-def batch(yaml_path):
+def batch(yaml_path, provider):
     """YAML 批量执行。
 
     读取批处理配置并并发执行多个任务。
     YAML 中支持 mode: chat / image / audio / video，chat 模式支持 reference 图片输入。
     """
-    _run_safely(run_batch, yaml_path)
+    _run_safely(run_batch, yaml_path, explicit_provider=provider)
 
 
 if __name__ == "__main__":

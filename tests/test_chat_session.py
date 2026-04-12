@@ -100,6 +100,30 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(captured["image_size"], "2K")
         self.assertEqual(captured["image_aspect_ratio"], "16:9")
 
+    def test_image_command_passes_provider_to_create_client(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None, explicit_provider=None):
+            captured["mode"] = mode
+            captured["explicit_model"] = explicit_model
+            captured["explicit_provider"] = explicit_provider
+            return object(), "test-image-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            return {"mode": mode, "output_paths": ["/tmp/result.jpg"], "printed": False}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(
+                cli,
+                ["image", "测试", "--provider", "cpa", "--model", "vertex/gemini-3.1-flash-image-preview"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["mode"], "image")
+        self.assertEqual(captured["explicit_provider"], "cpa")
+        self.assertEqual(captured["explicit_model"], "vertex/gemini-3.1-flash-image-preview")
+
     def test_image_command_rejects_removed_input_option(self):
         runner = CliRunner()
         result = runner.invoke(cli, ["image", "测试", "-i", "constraint-a.md"])
@@ -121,6 +145,27 @@ class ChatSessionTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(captured["reference"], ("a.txt", "b.png"))
+
+    def test_chat_command_passes_provider_to_create_client(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None, explicit_provider=None):
+            captured["mode"] = mode
+            captured["explicit_model"] = explicit_model
+            captured["explicit_provider"] = explicit_provider
+            return object(), "test-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            return {"mode": mode, "text": "回答", "printed": True}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["chat", "你好", "--provider", "vertexai2api", "--model", "google/gemini-2.5-flash"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["mode"], "chat")
+        self.assertEqual(captured["explicit_provider"], "vertexai2api")
+        self.assertEqual(captured["explicit_model"], "google/gemini-2.5-flash")
 
     def test_chat_command_rejects_removed_input_option(self):
         runner = CliRunner()
@@ -235,6 +280,31 @@ class ChatSessionTests(unittest.TestCase):
         result = runner.invoke(cli, ["audio", "总结录音内容"])
         self.assertNotEqual(result.exit_code, 0)
 
+    def test_audio_command_passes_provider_to_create_client(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None, explicit_provider=None):
+            captured["mode"] = mode
+            captured["explicit_model"] = explicit_model
+            captured["explicit_provider"] = explicit_provider
+            return object(), "test-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            kwargs["stream_handler"]("输出内容")
+            return {"mode": mode, "text": "输出内容", "printed": True}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(
+                cli,
+                ["audio", "总结录音内容", "-r", "demo.m4a", "--provider", "vertexai2api", "--model", "google/gemini-2.5-flash"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["mode"], "audio")
+        self.assertEqual(captured["explicit_provider"], "vertexai2api")
+        self.assertEqual(captured["explicit_model"], "google/gemini-2.5-flash")
+
     def test_build_messages_chat_inlines_text_and_keeps_image_url_references(self):
         from llm_cli.messages import build_messages
 
@@ -274,6 +344,21 @@ class ChatSessionTests(unittest.TestCase):
         content = messages[0]["content"]
         self.assertEqual(content[0]["type"], "file")
         self.assertEqual(content[0]["file"]["filename"], "ref.png")
+        self.assertEqual(content[1], {"type": "text", "text": "保留主体重绘"})
+
+    def test_build_messages_image_prefers_uploaded_reference_urls(self):
+        from llm_cli.messages import build_messages
+
+        messages = build_messages(
+            "image",
+            prompt="保留主体重绘",
+            reference_path=["/tmp/ref.png"],
+            reference_urls=["https://cdn.example.com/ref.png?sign=1"],
+        )
+
+        content = messages[0]["content"]
+        self.assertEqual(content[0]["type"], "image_url")
+        self.assertEqual(content[0]["image_url"]["url"], "https://cdn.example.com/ref.png?sign=1")
         self.assertEqual(content[1], {"type": "text", "text": "保留主体重绘"})
 
     def test_build_messages_grok2api_image_uses_image_url_parts_for_references(self):
@@ -871,6 +956,30 @@ tasks:
         self.assertEqual(captured["agent_dir"], "/tmp/pi-agent")
         self.assertEqual(captured["session"], "./pi-session.jsonl")
         self.assertEqual(captured["tools"], "read,grep,find,ls")
+
+    def test_agent_command_passes_provider_to_create_client(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None, explicit_provider=None):
+            captured["mode"] = mode
+            captured["explicit_model"] = explicit_model
+            captured["explicit_provider"] = explicit_provider
+            return object(), "agent-model", {"provider": {"base_url": "https://example.com/v1", "api_key": "demo-key"}}
+
+        def fake_run_pi_agent(**kwargs):
+            return None
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_pi_agent", fake_run_pi_agent):
+            result = runner.invoke(
+                cli,
+                ["agent", "检查当前仓库", "--provider", "vertexai2api", "--model", "google/gemini-2.5-flash"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["mode"], "chat")
+        self.assertEqual(captured["explicit_provider"], "vertexai2api")
+        self.assertEqual(captured["explicit_model"], "google/gemini-2.5-flash")
 
     def test_agent_command_accepts_no_session_and_no_tools(self):
         captured = {}
@@ -1640,6 +1749,30 @@ providers:
         self.assertEqual(captured["video_seconds"], "8")
         self.assertEqual(captured["video_size"], "720x1280")
 
+    def test_video_command_passes_provider_to_create_client(self):
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None, explicit_provider=None):
+            captured["mode"] = mode
+            captured["explicit_model"] = explicit_model
+            captured["explicit_provider"] = explicit_provider
+            return object(), "test-video-model", {}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            return {"mode": mode, "output_paths": ["/tmp/result.mp4"], "task_id": "vid_123", "printed": False}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(
+                cli,
+                ["video", "生成测试视频", "--provider", "vertexai2api", "--model", "google/veo-3-fast"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["mode"], "video")
+        self.assertEqual(captured["explicit_provider"], "vertexai2api")
+        self.assertEqual(captured["explicit_model"], "google/veo-3-fast")
+
     def test_video_command_accepts_arbitrary_size_and_seconds_values(self):
         captured = {}
 
@@ -1658,6 +1791,21 @@ providers:
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(captured["video_seconds"], "10")
         self.assertEqual(captured["video_size"], "1080P")
+
+    def test_batch_command_passes_provider_to_runner(self):
+        captured = {}
+
+        def fake_run_batch(yaml_path, explicit_provider=None):
+            captured["yaml_path"] = yaml_path
+            captured["explicit_provider"] = explicit_provider
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.run_batch", fake_run_batch):
+            result = runner.invoke(cli, ["batch", "tasks.yaml", "--provider", "vertexai2api"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["yaml_path"], "tasks.yaml")
+        self.assertEqual(captured["explicit_provider"], "vertexai2api")
 
     def test_video_command_does_not_apply_builtin_defaults(self):
         captured = {}
@@ -1776,6 +1924,48 @@ providers:
         self.assertIsNone(settings["model_config"])
         self.assertEqual(settings["mode"]["protocol"], "openai-chat-completions")
 
+    def test_resolve_mode_settings_allows_undefined_explicit_model_on_explicit_provider(self):
+        from llm_cli.config import resolve_mode_settings
+
+        config = {
+            "default_provider": "vertexai2api",
+            "modes": {
+                "image": {"provider": "vertexai2api", "model": "default-image-model"},
+            },
+            "providers": {
+                "cpa": {
+                    "base_url": "https://example.com/v1",
+                    "api_key": "demo-key",
+                    "models": {
+                        "default-image-model": {
+                            "type": "image",
+                            "alias": "image-default",
+                        }
+                    },
+                },
+                "vertexai2api": {
+                    "base_url": "https://vertex.example.com/v1",
+                    "api_key": "vertex-key",
+                    "models": {
+                        "vertex/gemini-3.1-flash-image-preview": {
+                            "type": "image",
+                        }
+                    },
+                },
+            },
+        }
+
+        settings = resolve_mode_settings(
+            "image",
+            config,
+            explicit_model="vertex/gemini-3.1-flash-image-preview",
+            explicit_provider="cpa",
+        )
+
+        self.assertEqual(settings["provider"]["name"], "cpa")
+        self.assertEqual(settings["model"], "vertex/gemini-3.1-flash-image-preview")
+        self.assertIsNone(settings["model_config"])
+
     def test_build_pi_models_config_uses_env_var_for_api_key(self):
         from llm_cli.pi_agent import build_pi_models_config
 
@@ -1892,6 +2082,46 @@ providers:
             )
 
         self.assertEqual(captured["model"], "grok-imagine-1.0-edit")
+        self.assertEqual(result["output_paths"], ["/tmp/result.jpg"])
+
+    def test_run_task_image_keeps_request_model_when_model_config_is_none(self):
+        from llm_cli.task import run_task
+
+        captured = {}
+
+        def fake_api_call(client, model, messages, **kwargs):
+            captured["model"] = model
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="https://example.com/result.jpg",
+                            images=None,
+                        )
+                    )
+                ]
+            )
+
+        with patch("llm_cli.task.prepare_reference_resources", return_value={"local_paths": ["/tmp/ref.png"], "url_references": []}), patch(
+            "llm_cli.task.build_messages",
+            return_value=[{"role": "user", "content": "测试"}],
+        ), patch("llm_cli.task.api_call", fake_api_call), patch(
+            "llm_cli.task.extract_image_result",
+            return_value=["/tmp/result.jpg"],
+        ):
+            result = run_task(
+                "image",
+                object(),
+                "vertex/gemini-3.1-flash-image-preview",
+                prompt="根据参考图制作更多写真",
+                reference=["/tmp/ref.png"],
+                config={
+                    "mode": {"protocol": "openai-chat-completions"},
+                    "model_config": None,
+                },
+            )
+
+        self.assertEqual(captured["model"], "vertex/gemini-3.1-flash-image-preview")
         self.assertEqual(result["output_paths"], ["/tmp/result.jpg"])
 
     def test_run_task_video_resumes_until_completion_and_downloads(self):
@@ -2459,6 +2689,32 @@ tasks:
                 run_batch(str(yaml_path))
 
         self.assertEqual(captured["video_size"], "1080P")
+
+    def test_run_batch_passes_explicit_provider_to_create_client(self):
+        from llm_cli.batch import run_batch
+
+        captured = []
+
+        def fake_create_client(mode, explicit_model=None, explicit_provider=None):
+            captured.append((mode, explicit_model, explicit_provider))
+            return object(), "test-chat-model", {"provider": {"name": explicit_provider or "default"}}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            return {"mode": mode, "text": "ok", "printed": True}
+
+        yaml_content = """\
+mode: chat
+tasks:
+  - prompt: "你好"
+"""
+
+        with TemporaryDirectory() as tmp:
+            yaml_path = Path(tmp) / "tasks.yaml"
+            yaml_path.write_text(yaml_content, encoding="utf-8")
+            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                run_batch(str(yaml_path), explicit_provider="vertexai2api")
+
+        self.assertEqual(captured, [("chat", None, "vertexai2api")])
 
 
 if __name__ == "__main__":

@@ -118,7 +118,7 @@ def resolve_task_output(mode, task, output_dir, yaml_dir, index):
     return None
 
 
-def run_batch(yaml_path_str: str):
+def run_batch(yaml_path_str: str, explicit_provider=None):
     ensure_yaml_available()
 
     yaml_path = resolve_path(yaml_path_str)
@@ -203,7 +203,10 @@ def run_batch(yaml_path_str: str):
     configs = {}
     provider_names = []
     for mode in modes:
-        client, model, config = create_client(mode)
+        create_client_kwargs = {}
+        if explicit_provider:
+            create_client_kwargs["explicit_provider"] = explicit_provider
+        client, model, config = create_client(mode, **create_client_kwargs)
         clients[mode] = (client, model)
         configs[mode] = config
         provider_names.append((config.get("provider") or {}).get("name") or get_config_value("BASE_URL", config) or mode)
@@ -221,7 +224,10 @@ def run_batch(yaml_path_str: str):
     def run_one(task_spec):
         task_model = task_spec.get("model")
         if task_model:
-            client, model, _ = create_client(task_spec["mode"], explicit_model=task_model)
+            create_client_kwargs = {"explicit_model": task_model}
+            if explicit_provider:
+                create_client_kwargs["explicit_provider"] = explicit_provider
+            client, model, _ = create_client(task_spec["mode"], **create_client_kwargs)
         else:
             client, model = clients[task_spec["mode"]]
 

@@ -125,6 +125,8 @@ llm chat -I -s ./sessions/product-review.jsonl
 
 说明：
 
+- `--provider` 可临时覆盖当前 chat 模式使用的 provider
+- `--model` 与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名；未命中时直接按原始模型名发送
 - `-s product-review` 会写到当前目录下的 `product-review.jsonl`
 - 单次模式和 `-I -s ...` 交互模式可共享同一个会话文件
 - `llm chat -I "首轮问题"` 会先发送首轮消息，再进入连续对话
@@ -165,6 +167,8 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 
 ### 说明
 
+- `--provider` 可临时覆盖当前 agent 复用的 chat provider
+- `--model` 与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名；未命中时直接按原始模型名发送
 - 这是独立入口，不替换现有 `chat -I`
 - 运行时会在 `~/.llm/pi-agent/` 下生成 `pi` 所需的 `models.json`
 - `models.json` 只写 `base_url` 与 API key 的环境变量名，真实 key 通过子进程环境变量注入
@@ -196,6 +200,8 @@ llm image "生成横版海报" --size 2K --aspect 16:9 -o banner.jpg
 ### 常用参数
 
 - `-n/--count`：生成数量
+- `--provider`：临时覆盖当前 image 模式使用的 provider
+- `--model`：临时覆盖当前 image 模式使用的模型
 - `--size`：支持 `512 / 1K / 2K / 4K`
 - `--aspect`：支持 `1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9`
 
@@ -203,6 +209,8 @@ llm image "生成横版海报" --size 2K --aspect 16:9 -o banner.jpg
 
 - `--size` 和 `--aspect` 的实际生效情况取决于图片后端
 - `image` 当前统一通过流式请求收集结果
+- `-r/--reference` 默认按 `type=file` 发送；当配置了 `reference_transport` 且图片参考已预上传为 URL 时，会优先改用 `image_url`
+- `--provider` 与 `--model` 同时使用时，会优先在该 provider 下解析模型别名；未命中时直接按原始模型名发送
 
 ## `llm audio`
 
@@ -218,6 +226,8 @@ llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
 
 说明：
 
+- `--provider` 可临时覆盖当前 audio 模式使用的 provider
+- `--model` 与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名；未命中时直接按原始模型名发送
 - 位置参数是 prompt
 - `-r/--reference` 上传音频附件
 - 默认实时输出到 stdout，仅在传 `-o` 时写文件
@@ -237,6 +247,8 @@ llm video --resume vid_123 -o demo.mp4
 
 说明：
 
+- `--provider` 可临时覆盖当前 video 模式使用的 provider
+- `--model` 与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名；未命中时直接按原始模型名发送
 - `video` 默认先创建异步任务，再持续等待完成并自动下载
 - 创建成功后会先打印任务 ID，便于中断后用 `--resume` 恢复
 - `-r/--reference` 当前仅取第一张图作为 `input_reference`
@@ -256,6 +268,10 @@ llm video --resume vid_123 -o demo.mp4
 ```bash
 llm batch tasks.yaml
 ```
+
+说明：
+
+- `--provider` 可统一覆盖 batch 内各任务默认使用的 provider
 
 示例：
 

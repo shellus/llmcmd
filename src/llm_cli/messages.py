@@ -76,6 +76,7 @@ def build_messages(
         reference_paths = list(reference_path)
     else:
         reference_paths = [reference_path]
+    reference_urls = list(reference_urls or [])
 
     messages = []
     if system_prompt:
@@ -125,15 +126,14 @@ def build_messages(
             fail("image 模式至少需要 prompt")
         if reference_paths:
             content = []
-            if protocol == "grok2api-image" and reference_urls:
-                for url in reference_urls:
-                    content.append(_build_remote_image_url_part(url))
-            else:
-                for path in reference_paths:
-                    if protocol == "grok2api-image" and is_image_attachment(path):
-                        content.append(_build_image_url_part(path))
-                    else:
-                        content.append(_build_file_part(path))
+            for index, path in enumerate(reference_paths):
+                reference_url = reference_urls[index] if index < len(reference_urls) else None
+                if reference_url and is_image_attachment(path):
+                    content.append(_build_remote_image_url_part(reference_url))
+                elif protocol == "grok2api-image" and is_image_attachment(path):
+                    content.append(_build_image_url_part(path))
+                else:
+                    content.append(_build_file_part(path))
             content.append({"type": "text", "text": message_text})
             messages.append({"role": "user", "content": content})
         else:

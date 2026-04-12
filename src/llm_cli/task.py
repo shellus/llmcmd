@@ -92,7 +92,7 @@ def run_task(
     else:
         reference_urls = []
     if mode == "image" and reference:
-        configured_edit_model = (config or {}).get("model_config", {}).get("edit_model")
+        configured_edit_model = ((config or {}).get("model_config") or {}).get("edit_model")
         if configured_edit_model:
             request_model = configured_edit_model
     audio_path = None
