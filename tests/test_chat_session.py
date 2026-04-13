@@ -426,6 +426,8 @@ class ChatSessionTests(unittest.TestCase):
             api_module.set_debug(old_debug)
 
         self.assertIn('"stream": true', stderr.getvalue().lower())
+        self.assertIn("POST https://example.com/v1/chat/completions body=", stderr.getvalue())
+        self.assertIn("STREAM done", stderr.getvalue())
 
     def test_api_call_passes_image_config_through_extra_body(self):
         from llm_cli.api import api_call
@@ -548,9 +550,9 @@ class ChatSessionTests(unittest.TestCase):
             api_module.set_debug(old_debug)
 
         log = stderr.getvalue()
-        self.assertIn("视频请求方法:", log)
+        self.assertIn("GET https://example.com/v1/videos/vid_123", log)
         self.assertIn("/videos/vid_123", log)
-        self.assertIn("视频响应:", log)
+        self.assertIn('-> {"id": "vid_123", "status": "completed"}', log)
 
     def test_video_api_debug_logs_include_newapi_request_body_summary(self):
         from llm_cli import api as api_module
@@ -588,7 +590,9 @@ class ChatSessionTests(unittest.TestCase):
             api_module.set_debug(old_debug)
 
         log = stderr.getvalue()
-        self.assertIn("视频请求体:", log)
+        self.assertIn("视频创建摘要:", log)
+        self.assertIn('"reference_input_mode": "uploaded_url"', log)
+        self.assertIn("POST https://example.com/v1/video/create body=", log)
         self.assertIn('"model": "grok-video-3"', log)
         self.assertIn('"size": "720P"', log)
         self.assertIn('"images"', log)
@@ -626,8 +630,7 @@ class ChatSessionTests(unittest.TestCase):
             api_module.set_debug(old_debug)
 
         log = stderr.getvalue()
-        self.assertIn("视频错误状态: 403", log)
-        self.assertIn("视频错误响应体:", log)
+        self.assertIn("403 GET https://example.com/v1/videos/vid_123 error=", log)
         self.assertIn("permission_error", log)
 
     def test_video_headers_include_default_user_agent(self):
@@ -2310,6 +2313,70 @@ providers:
         self.assertIn('"size": "720p"', captured["body"])
         self.assertIn('"images": ["data:image/jpeg;base64,', captured["body"])
 
+    def test_create_video_task_applies_defaults_for_openai_videos(self):
+        from llm_cli import api as api_module
+        from llm_cli.api import create_video_task
+
+        captured = {}
+        stderr = StringIO()
+        old_stderr = os.sys.stderr
+        old_debug = api_module.DEBUG
+        os.sys.stderr = stderr
+        api_module.set_debug(True)
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"id":"task-1","status":"pending"}'
+
+        def fake_urlopen(request, timeout=300):
+            captured["url"] = request.full_url
+            captured["content_type"] = request.headers["Content-type"]
+            captured["body"] = request.data.decode("utf-8", "replace")
+            return FakeResponse()
+
+        client = SimpleNamespace(base_url="https://video.example.com/v1", api_key="demo-key")
+        config = {
+            "mode": {
+                "protocol": "openai-videos",
+                "defaults": {"seconds": 4, "size": "1280x720"},
+            }
+        }
+
+        try:
+            with TemporaryDirectory() as tmp:
+                image_path = Path(tmp) / "cover.webp"
+                image_path.write_bytes(b"fake-image")
+                with patch("llm_cli.api.urllib.request.urlopen", fake_urlopen):
+                    result = create_video_task(
+                        client,
+                        model="google/veo-3.1-lite-generate-001",
+                        prompt="test prompt",
+                        input_reference=str(image_path),
+                        config=config,
+                    )
+        finally:
+            os.sys.stderr = old_stderr
+            api_module.set_debug(old_debug)
+
+        self.assertEqual(result["id"], "task-1")
+        self.assertEqual(captured["url"], "https://video.example.com/v1/videos")
+        self.assertIn('name="seconds"', captured["body"])
+        self.assertIn("\r\n\r\n4\r\n", captured["body"])
+        self.assertIn('name="size"', captured["body"])
+        self.assertIn("\r\n\r\n1280x720\r\n", captured["body"])
+        log = stderr.getvalue()
+        self.assertIn("视频创建摘要:", log)
+        self.assertIn('"seconds": 4', log)
+        self.assertIn('"size": "1280x720"', log)
+        self.assertIn('"reference_input_mode": "multipart_file"', log)
+        self.assertIn('"reference_url_available": false', log)
+
     def test_create_video_task_omits_empty_unified_protocol_fields(self):
         from llm_cli.api import create_video_task
 
@@ -2473,8 +2540,10 @@ providers:
         self.assertEqual(presign_calls[0][1]["Bucket"], "demo-bucket")
         self.assertEqual(presign_calls[0][1]["Key"], "llmcmd/1111111111111111111-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png")
         self.assertEqual(presign_calls[0][2], 1800)
-        self.assertIn("参考资源上传开始:", stderr.getvalue())
-        self.assertIn("参考资源签名 URL:", stderr.getvalue())
+        self.assertIn('UPLOAD config {"transport_name": "aliyun-s3", "url_mode": "presign", "file_count": 1}', stderr.getvalue())
+        self.assertIn("UPLOAD PUT oss://demo-bucket/", stderr.getvalue())
+        self.assertIn("UPLOAD OK oss://demo-bucket/", stderr.getvalue())
+        self.assertIn("UPLOAD URL presign oss://demo-bucket/", stderr.getvalue())
 
     def test_create_s3_client_uses_virtual_hosted_style(self):
         from llm_cli.reference_transport import create_s3_client

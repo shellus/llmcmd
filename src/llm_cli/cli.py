@@ -49,21 +49,19 @@ def _video_progress(event, **payload):
         progress = payload.get("progress")
         waited_seconds = payload.get("waited_seconds")
         next_delay_seconds = payload.get("next_delay_seconds")
-        suffix = f", progress={progress}" if progress is not None else ""
+        parts = [f"task_id={payload['task_id']}", f"status={payload.get('status')}"]
+        if progress is not None:
+            parts.append(f"progress={progress}")
         if waited_seconds is not None:
-            suffix += f", waited={waited_seconds}s"
+            parts.append(f"waited={waited_seconds}s")
         if next_delay_seconds is not None:
-            suffix += f", next_poll={next_delay_seconds}s"
-        click.echo(f"[DEBUG] 视频状态: task_id={payload['task_id']}, status={payload.get('status')}{suffix}", err=True)
-    elif event == "task_completed" and api.DEBUG:
-        click.echo(f"[DEBUG] 视频完成: task_id={payload['task_id']}, status={payload.get('status')}", err=True)
-    elif event == "download_start" and api.DEBUG:
-        click.echo(f"[DEBUG] 开始下载视频: task_id={payload['task_id']}, path={payload['path']}", err=True)
+            parts.append(f"next={next_delay_seconds}s")
+        click.echo(f"[DEBUG] POLL {' '.join(parts)}", err=True)
     elif event == "download_progress" and api.DEBUG:
-        click.echo(f"[DEBUG] 视频下载进度: task_id={payload['task_id']}, bytes={payload['bytes_written']}", err=True)
+        click.echo(f"[DEBUG] DOWNLOAD progress task_id={payload['task_id']} bytes={payload['bytes_written']}", err=True)
     elif event == "download_done" and api.DEBUG:
         click.echo(
-            f"[DEBUG] 视频下载完成: task_id={payload['task_id']}, bytes={payload['bytes_written']}, path={payload['path']}",
+            f"[DEBUG] DOWNLOAD done task_id={payload['task_id']} bytes={payload['bytes_written']} path={payload['path']}",
             err=True,
         )
 

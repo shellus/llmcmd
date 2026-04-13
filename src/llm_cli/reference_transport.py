@@ -3,7 +3,7 @@ from pathlib import Path
 from time import time_ns
 from uuid import uuid4
 
-from .api import debug_log
+from .api import _debug_json, debug_log
 from .utils import resolve_path
 
 try:
@@ -53,6 +53,7 @@ def _build_object_key(path, prefix=None):
 
 def _build_reference_url(client, transport_config, bucket, object_key):
     url_mode = str(transport_config.get("url_mode") or "public").strip().lower()
+    object_ref = f"oss://{bucket}/{object_key}"
     if url_mode == "presign":
         expires_in = int(transport_config.get("expires_in") or 3600)
         url = client.generate_presigned_url(
@@ -60,22 +61,14 @@ def _build_reference_url(client, transport_config, bucket, object_key):
             Params={"Bucket": bucket, "Key": object_key},
             ExpiresIn=expires_in,
         )
-        debug_log(
-            "参考资源签名 URL:",
-            {
-                "bucket": bucket,
-                "key": object_key,
-                "expires_in": expires_in,
-                "url": url,
-            },
-        )
+        debug_log(f"UPLOAD URL presign {object_ref} expires={expires_in} url={url}")
         return url
 
     public_base_url = transport_config.get("public_base_url")
     if not public_base_url:
         raise ValueError("reference_transport 使用 public URL 时必须配置 public_base_url")
     url = f"{_normalize_public_base_url(public_base_url)}/{object_key}"
-    debug_log("参考资源公开 URL:", {"bucket": bucket, "key": object_key, "url": url})
+    debug_log(f"UPLOAD URL public {object_ref} url={url}")
     return url
 
 
@@ -86,16 +79,9 @@ def _upload_one(path, transport_config):
 
     client = create_s3_client(transport_config)
     object_key = _build_object_key(path, transport_config.get("key_prefix"))
+    object_ref = f"oss://{bucket}/{object_key}"
     mime_type = mimetypes.guess_type(path.name)[0]
-    debug_log(
-        "参考资源上传开始:",
-        {
-            "path": str(path),
-            "bucket": bucket,
-            "key": object_key,
-            "mime_type": mime_type,
-        },
-    )
+    debug_log(f"UPLOAD PUT {object_ref} path={path} mime={mime_type or 'application/octet-stream'}")
     kwargs = {
         "Bucket": bucket,
         "Key": object_key,
@@ -104,7 +90,7 @@ def _upload_one(path, transport_config):
     if mime_type:
         kwargs["ContentType"] = mime_type
     client.put_object(**kwargs)
-    debug_log("参考资源上传完成:", {"bucket": bucket, "key": object_key, "bytes": len(kwargs["Body"])})
+    debug_log(f"UPLOAD OK {object_ref} bytes={len(kwargs['Body'])}")
     return _build_reference_url(client, transport_config, bucket, object_key)
 
 
@@ -117,7 +103,10 @@ def prepare_reference_resources(reference_paths, *, config=None, base_dir=None):
     if transport is None:
         transport = ((config or {}).get("mode") or {}).get("reference_transport")
     if isinstance(transport, str):
-        transport = ((config or {}).get("reference_transports") or {}).get(transport)
+        transport_name = transport
+        transport = dict((((config or {}).get("reference_transports") or {}).get(transport_name)) or {})
+        if transport:
+            transport["name"] = transport_name
     if not transport:
         return {
             "local_paths": local_paths,
@@ -125,12 +114,14 @@ def prepare_reference_resources(reference_paths, *, config=None, base_dir=None):
         }
 
     debug_log(
-        "参考资源传输配置:",
-        {
-            "transport_name": transport.get("name"),
-            "url_mode": transport.get("url_mode") or "public",
-            "file_count": len(local_paths),
-        },
+        "UPLOAD config "
+        + _debug_json(
+            {
+                "transport_name": transport.get("name"),
+                "url_mode": transport.get("url_mode") or "public",
+                "file_count": len(local_paths),
+            }
+        )
     )
 
     url_references = []
