@@ -4,6 +4,19 @@ from pathlib import Path
 
 from .utils import fail, resolve_path
 
+CANONICAL_AUDIO_MIME_TYPES = {
+    "audio/x-wav": "audio/wav",
+    "audio/wave": "audio/wav",
+    "audio/vnd.wave": "audio/wav",
+    "audio/x-pn-wav": "audio/wav",
+}
+
+
+def _normalize_audio_mime_type(mime_type):
+    if not mime_type:
+        return None
+    return CANONICAL_AUDIO_MIME_TYPES.get(mime_type, mime_type)
+
 
 def detect_mime_type(file_path, expected_kind=None):
     mime_type, _ = mimetypes.guess_type(str(file_path))
@@ -12,6 +25,7 @@ def detect_mime_type(file_path, expected_kind=None):
             return mime_type
         return None
     if expected_kind == "audio":
+        mime_type = _normalize_audio_mime_type(mime_type)
         if mime_type and mime_type.startswith("audio/"):
             return mime_type
         ext_map = {

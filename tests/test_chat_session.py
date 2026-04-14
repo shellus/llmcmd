@@ -14,6 +14,14 @@ from llm_cli.interactive import InteractiveChatState, run_interactive_chat
 
 
 class ChatSessionTests(unittest.TestCase):
+    def test_detect_mime_type_normalizes_audio_x_wav(self):
+        from llm_cli.files import detect_mime_type
+
+        with patch("llm_cli.files.mimetypes.guess_type", return_value=("audio/x-wav", None)):
+            mime_type = detect_mime_type("demo.wav", expected_kind="audio")
+
+        self.assertEqual(mime_type, "audio/wav")
+
     def test_api_call_stream_collects_image_deltas(self):
         from llm_cli.api import api_call
 
@@ -344,6 +352,8 @@ class ChatSessionTests(unittest.TestCase):
         content = messages[0]["content"]
         self.assertEqual(content[0]["type"], "file")
         self.assertEqual(content[0]["file"]["filename"], "ref.png")
+        self.assertEqual(content[0]["file"]["mime_type"], "image/png")
+        self.assertEqual(content[0]["file"]["file_data"], "data:image/png;base64,QQ==")
         self.assertEqual(content[1], {"type": "text", "text": "保留主体重绘"})
 
     def test_build_messages_image_prefers_uploaded_reference_urls(self):
@@ -360,6 +370,20 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(content[0]["type"], "image_url")
         self.assertEqual(content[0]["image_url"]["url"], "https://cdn.example.com/ref.png?sign=1")
         self.assertEqual(content[1], {"type": "text", "text": "保留主体重绘"})
+
+    def test_build_messages_audio_file_part_includes_mime_type(self):
+        from llm_cli.messages import build_messages
+
+        with patch("llm_cli.messages.load_binary_attachment") as mock_load:
+            mock_load.return_value = {"path": "/tmp/demo.m4a", "mime_type": "audio/mp4", "base64_data": "QQ=="}
+            messages = build_messages("audio", prompt="请输出标准 SRT 字幕", audio_path="/tmp/demo.m4a")
+
+        content = messages[0]["content"]
+        self.assertEqual(content[0]["type"], "file")
+        self.assertEqual(content[0]["file"]["filename"], "demo.m4a")
+        self.assertEqual(content[0]["file"]["mime_type"], "audio/mp4")
+        self.assertEqual(content[0]["file"]["file_data"], "data:audio/mp4;base64,QQ==")
+        self.assertEqual(content[1], {"type": "text", "text": "请输出标准 SRT 字幕"})
 
     def test_build_messages_grok2api_image_uses_image_url_parts_for_references(self):
         from llm_cli.messages import build_messages
