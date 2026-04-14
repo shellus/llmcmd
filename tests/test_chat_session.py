@@ -521,6 +521,31 @@ class ChatSessionTests(unittest.TestCase):
             self.assertEqual(paths, [str(target)])
             self.assertEqual(target.read_bytes(), b"image-bytes")
 
+    def test_extract_image_result_accepts_markdown_data_url_in_content(self):
+        from llm_cli.output import extract_image_result
+
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="![image](data:image/png;base64,QUJD)",
+                        images=None,
+                    )
+                )
+            ]
+        )
+
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp) / "result.png"
+            paths = extract_image_result(
+                response,
+                str(target),
+                config={"mode": {"protocol": "openai-chat-completions"}},
+            )
+
+            self.assertEqual(paths, [str(target)])
+            self.assertEqual(target.read_bytes(), b"ABC")
+
     def test_video_api_debug_logs_include_request_and_response(self):
         from llm_cli import api as api_module
 

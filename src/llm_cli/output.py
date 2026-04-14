@@ -64,6 +64,15 @@ def _extract_image_urls_from_content(content):
     return direct_urls
 
 
+def _extract_image_data_urls_from_content(content):
+    if not content:
+        return []
+    markdown_data_urls = re.findall(r"!\[.*?\]\((data:image/[^)]+)\)", str(content))
+    if markdown_data_urls:
+        return markdown_data_urls
+    return re.findall(r"data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+", str(content))
+
+
 def extract_image_result(response, output_path, image_index=0, config=None):
     message = response.choices[0].message
     output_path = Path(output_path)
@@ -86,6 +95,16 @@ def extract_image_result(response, output_path, image_index=0, config=None):
     content = getattr(message, "content", None) or ""
     if isinstance(content, list):
         content = extract_text_result(response)
+    data_urls = _extract_image_data_urls_from_content(content)
+    if data_urls:
+        saved_paths = []
+        for offset, data_url in enumerate(data_urls):
+            b64_data = data_url.split(";base64,", 1)[1]
+            dest = image_output_path(output_path, image_index + offset)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(base64.b64decode(b64_data))
+            saved_paths.append(dest)
+        return [str(path) for path in saved_paths]
     img_urls = _extract_image_urls_from_content(content) if protocol == "grok2api-image" else re.findall(
         r"!\[.*?\]\((https?://[^\s)]+)\)", str(content)
     )
