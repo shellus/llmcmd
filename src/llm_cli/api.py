@@ -336,6 +336,41 @@ def download_video_content_stream(client, task_id, chunk_size=1024 * 256, config
             yield chunk
 
 
+def generate_tts_content(client, *, model, prompt, voice=None, config=None):
+    base_url = _client_base_url(client)
+    if base_url.endswith("/v1"):
+        base_url = base_url[:-3]
+    model_path = str(model).lstrip("/")
+    if model_path.startswith("v1beta/"):
+        url = f"{base_url}/{model_path}:generateContent"
+    else:
+        url = f"{base_url}/v1beta/models/{model_path}:generateContent"
+
+    body = {
+        "model": model,
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+        },
+    }
+    if voice:
+        body["generationConfig"]["speechConfig"] = {
+            "voiceConfig": {
+                "prebuiltVoiceConfig": {
+                    "voiceName": voice,
+                }
+            }
+        }
+
+    headers = {
+        "x-goog-api-key": _client_api_key(client),
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": _video_user_agent(),
+    }
+    return _json_body_request(url, body, headers, "POST")
+
+
 def api_call(client, model, messages, temperature=None, max_output_tokens=None, stream_handler=None, extra_body=None, config=None):
     protocol = ((config or {}).get("mode") or {}).get("protocol") or "openai-chat-completions"
     kwargs = {

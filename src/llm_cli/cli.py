@@ -171,7 +171,7 @@ def _run_chat_once(
 @click.group(context_settings=dict(help_option_names=["-h", "--help"]))
 @click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
 def cli():
-    """统一 LLM CLI：chat / agent / image / audio / video / batch。"""
+    """统一 LLM CLI：chat / agent / image / tts / video / batch。"""
     pass
 
 
@@ -352,47 +352,32 @@ def video(prompt, reference, system, output, seconds, video_size, resume_task_id
 @cli.command(
     epilog="""\b
 使用示例:
-  llm audio "总结录音内容" -r demo.m4a
-  llm audio -r demo.m4a
-  llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
+  llm tts "请用温和语气朗读这段话" -o demo.wav
+  llm tts @prompt.txt --voice Kore -o demo.wav
 """
 )
 @click.argument("prompt", required=False, default=None, metavar="[PROMPT|@FILE]")
-@click.option("-r", "--reference", "audio_file", required=True, help="音频文件路径")
-@click.option("-s", "--system", default=None, help="system prompt，可使用 @文件路径 从文件读取")
-@click.option("-o", "--output", default=None, help="输出路径")
-@click.option("--provider", default=None, help="覆盖当前 audio mode 的 provider")
+@click.option("--voice", default=None, help="预置音色名，例如 Kore")
+@click.option("-o", "--output", default=None, help="输出 wav 路径")
+@click.option("--provider", default=None, help="覆盖当前 tts mode 的 provider")
 @click.option("--model", default=None, help="覆盖当前 mode 的模型")
-@click.option("-t", "--temperature", type=float, default=None, help="高级选项：采样温度")
-@click.option("-m", "--max-output-tokens", type=int, default=None, help="高级选项：最大输出 token 数")
 @click.option("--debug", is_flag=True, is_eager=True, expose_value=False, callback=_set_debug, help="输出详细的请求响应信息")
-def audio(prompt, audio_file, system, output, provider, model, temperature, max_output_tokens):
-    """音频转录为文本或 SRT。
-
-    PROMPT 支持直接传字面量，也支持使用 @文件路径 从文件读取。
-    音频文件通过 -r/--reference 传入。
-    """
-    client, resolved_model, _ = _create_client_for_mode("audio", model=model, provider=provider)
+def tts(prompt, voice, output, provider, model):
+    """文本转语音。"""
+    if not prompt:
+        fail("tts 子命令需要 prompt")
+    client, resolved_model, config = _create_client_for_mode("tts", model=model, provider=provider)
     result = _run_safely(
         run_task,
-        "audio",
+        "tts",
         client,
         resolved_model,
         prompt=prompt,
-        system_prompt=system,
-        audio_file=audio_file,
+        voice=voice,
         output=output,
-        temperature=temperature,
-        max_output_tokens=max_output_tokens,
-        stream_handler=_stream_to_stdout,
+        config=config,
     )
-    if result.get("text"):
-        result["already_streamed"] = True
-    if output:
-        click.echo()
-        print(f"已写入: {result['output_path']}")
-    elif not result.get("already_streamed"):
-        _render_text_result(result)
+    print(f"已写入: {result['output_path']}")
 
 
 @cli.command(
@@ -461,7 +446,7 @@ def batch(yaml_path, provider):
     """YAML 批量执行。
 
     读取批处理配置并并发执行多个任务。
-    YAML 中支持 mode: chat / image / audio / video，chat 模式支持 reference 图片输入。
+    YAML 中支持 mode: chat / image / tts / video，chat 模式支持 reference 图片输入。
     """
     _run_safely(run_batch, yaml_path, explicit_provider=provider)
 

@@ -6,8 +6,9 @@
 
 - 写文案、总结、翻译、提取结构化数据
 - 根据参考图生成或修改图片
-- 把音频转成文本或 SRT 字幕
-- 用 YAML 一次编排多条 chat / image / audio / video 任务
+- 结合音频附件做转写、总结或字幕生成
+- 把文本直接合成为语音 wav
+- 用 YAML 一次编排多条 chat / image / tts / video 任务
 - 直接在终端里按要求编辑文本文件
 - 用 JSONL 持久化 `chat` 会话，并在终端里连续对话
 - 直接桥接 `pi` coding agent，复用当前 `llmcmd` 的网关配置
@@ -16,12 +17,12 @@
 
 ## 为什么用它
 
-- **一个命令统一入口**：`chat`、`agent`、`image`、`audio`、`batch`
+- **一个命令统一入口**：`chat`、`agent`、`image`、`tts`、`batch`
 - **终端友好**：天然适合 shell、cron、CI、脚本拼装
 - **文件编辑能力**：`chat --edit` 直接按要求改文件
 - **多图生成能力**：`image -n` 支持数量控制、并发控制和轻量进度输出
 - **批处理能力**：YAML 一次组织多条任务
-- **兼容 OpenAI 风格接口**：适合自建网关、代理层、兼容服务
+- **兼容 OpenAI 风格接口与 Gemini 原生接口**：适合自建网关、代理层、兼容服务
 
 ## 安装
 
@@ -55,11 +56,12 @@ llm chat "把人物脸型改成偏瘦，不要改动其他描述" --edit prompt.
 llm chat "按要求改写" --edit prompt.md -o prompt.v2.md
 ```
 
-### 3. 结合图片理解来写提示词
+### 3. 结合附件理解内容
 
 ```bash
 llm chat "详细描述这张图的所有细节" -r photo.jpg
 llm chat "总结这个附件的重点" -r report.docx
+llm chat "请转写这段录音并输出标准 SRT 字幕" -r demo.wav -o demo.srt
 llm chat "对比两张参考图后总结共同特征" -r photo-a.jpg -r photo-b.jpg
 llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
 ```
@@ -80,12 +82,11 @@ llm image "生成横版海报" --size 2K --aspect 16:9 -o banner.jpg
 - `poster_1.jpg`
 - `poster_2.jpg`
 
-### 5. 音频转录或总结
+### 5. 文本转语音
 
 ```bash
-llm audio "总结录音内容" -r demo.m4a
-llm audio -r demo.m4a
-llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
+llm tts "请用温和语气朗读这段话" -o demo.wav
+llm tts @prompt.txt --voice Kore -o demo.wav
 ```
 
 ### 6. 视频生成
@@ -131,9 +132,10 @@ tasks:
     aspect: "16:9"
     output: hero.jpg
 
-  - mode: audio
-    audio_file: meeting.mp3
-    prompt: "请输出标准 SRT 字幕"
+  - mode: tts
+    prompt: "请朗读这段欢迎词"
+    voice: Kore
+    output: welcome.wav
 
   - mode: video
     prompt: "生成一段产品宣传短片"
@@ -148,7 +150,7 @@ tasks:
 
 ### `llm chat`
 用于文本生成、分析、问答、改写、持久对话，以及 `--edit` 文件编辑。
-`@文件` 用于把文本直接读进 prompt；`-r/--reference` 用于提供参考附件，其中图片按 `image_url` 发送，文本附件会先内联为文本内容块。
+`@文件` 用于把文本直接读进 prompt；`-r/--reference` 用于提供参考附件，其中图片按 `image_url` 发送，文本附件会先内联为文本内容块，音频附件会作为 `file` 输入发送。
 
 新增会话参数：
 
@@ -179,9 +181,10 @@ llm chat -I -s ./sessions/product-review.jsonl
 - `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只会覆盖会话开头连续的 system 消息，其余历史保留
 - 交互式内置命令：`/clear` 清空当前会话，`/model <name>` 切换当前模型并写回 `~/.llm/.env` 中的 `CHAT_MODEL`，`/save <name-or-path>` 将当前会话保存到指定文件
 - 如需使用终端原生鼠标拖选复制历史消息，请按住终端模拟器的修饰键；当前环境实测为按住 `Shift` 再拖选
-- `chat` / `image` / `audio` 当前统一通过流式请求收集结果
-- 非交互 `chat` 与 `audio` 会实时把流式文本写到 stdout
+- `chat` 与 `image` 当前通过流式请求收集结果
+- 非交互 `chat` 会实时把流式文本写到 stdout
 - 若 `chat` 使用图片模型并返回图片，会自动落盘并显示图片路径
+- 音频理解已并入 `chat -r`；`audio` 子命令已删除
 
 ### `llm agent`
 用于启动外部 `pi` coding agent，但复用当前 `llmcmd` 的 `chat` 模型、`BASE_URL` 与 `API_KEY` 配置。
@@ -219,13 +222,15 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 - `--size` 和 `--aspect` 的实际生效情况取决于你所使用的图片后端
 - batch YAML 中的 `aspect` 建议写成带引号的字符串，例如 `"16:9"`，避免 YAML 误解析
 
-### `llm audio`
-用于把音频送入模型处理，位置参数是 prompt，`-r/--reference` 上传音频附件；默认实时输出到 stdout，仅在传 `-o` 时写文件。若要 SRT，请直接在 prompt 中明确要求。
+### `llm tts`
+用于文本转语音，输出 `wav` 文件。
 
 补充说明：
 
-- `--provider` 可临时覆盖当前 audio 模式使用的 provider
+- `--provider` 可临时覆盖当前 tts 模式使用的 provider
 - `--model` 与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名，未命中时直接按原始模型名发送
+- `--voice` 用于指定 Gemini 预置音色名，例如 `Kore`
+- 当前通过 Gemini 原生 `generateContent` 返回音频 PCM，再封装为 wav
 
 ### `llm video`
 用于异步视频生成。默认会创建任务、等待完成并自动下载，也支持通过 `--resume <task_id>` 恢复等待并下载。
@@ -246,7 +251,7 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 
 - `--provider` 可统一覆盖 batch 内各任务默认使用的 provider
 - 如果定义了 `output`，始终以 `output` 为准
-- 图片和视频任务未定义 `output` 时，会按任务序号自动命名为 `image-1.jpg`、`video-2.mp4`
+- 图片、语音、视频任务未定义 `output` 时，会按任务序号自动命名为 `image-1.jpg`、`tts-2.wav`、`video-3.mp4`
 
 ## 配置
 

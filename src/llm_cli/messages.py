@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .files import is_image_attachment, is_text_attachment, load_binary_attachment, read_text_attachment
+from .files import is_audio_attachment, is_image_attachment, is_text_attachment, load_binary_attachment, read_text_attachment
 from .utils import fail, join_message_parts
 
 DEFAULT_EDIT_PROMPT = """你是一个严谨的文本编辑助手。你会收到一份原始文件内容，以及用户的修改要求。
@@ -113,6 +113,8 @@ def build_messages(
             for path in reference_paths:
                 if is_image_attachment(path):
                     content.append(_build_image_url_part(path))
+                elif is_audio_attachment(path):
+                    content.append(_build_file_part(path, expected_kind="audio"))
                 elif is_text_attachment(path):
                     content.append(_build_text_attachment_part(path))
                 else:
@@ -139,16 +141,6 @@ def build_messages(
             messages.append({"role": "user", "content": content})
         else:
             messages.append({"role": "user", "content": message_text})
-        return messages
-
-    if mode == "audio":
-        if not audio_path:
-            fail("audio 模式需要 audio_file 文件")
-        # 使用 file type 而非 input_audio，因为 cliproxy 的 gemini translator 支持 file
-        content = [_build_file_part(audio_path, expected_kind="audio")]
-        if message_text:
-            content.append({"type": "text", "text": message_text})
-        messages.append({"role": "user", "content": content})
         return messages
 
     fail(f"不支持的 mode: {mode}")

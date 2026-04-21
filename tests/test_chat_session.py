@@ -261,7 +261,44 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(len(result["output_paths"]), 1)
         self.assertTrue(result["output_paths"][0].endswith("chat-image.png"))
 
-    def test_audio_command_uses_prompt_argument_and_reference_file(self):
+    def test_run_task_tts_writes_wav_output(self):
+        from llm_cli.task import run_task
+
+        response = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "audio/L16;rate=24000",
+                                    "data": "AQACAA==",
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+
+        with TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "demo.wav"
+            with patch("llm_cli.task.generate_tts_content", lambda *args, **kwargs: response):
+                result = run_task("tts", object(), "vertex/gemini-3.1-flash-tts-preview", prompt="你好", output=str(output_path))
+
+            data = output_path.read_bytes()
+
+        self.assertEqual(result["mode"], "tts")
+        self.assertEqual(result["output_path"], str(output_path))
+        self.assertTrue(data.startswith(b"RIFF"))
+
+    def test_audio_command_removed(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["audio", "总结录音内容", "-r", "demo.m4a"])
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("No such command 'audio'", result.output)
+
+    def test_tts_command_uses_prompt_argument_and_voice_option(self):
         captured = {}
 
         def fake_create_client(mode, explicit_model=None):
@@ -269,26 +306,19 @@ class ChatSessionTests(unittest.TestCase):
 
         def fake_run_task(mode, client, model, **kwargs):
             captured.update(kwargs)
-            kwargs["stream_handler"]("输出内容")
-            return {"mode": mode, "text": "输出内容", "printed": True}
+            return {"mode": mode, "output_path": "demo.wav", "printed": False}
 
         runner = CliRunner()
         with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
-            result = runner.invoke(cli, ["audio", "总结录音内容", "-r", "demo.m4a"])
+            result = runner.invoke(cli, ["tts", "朗读这句话", "--voice", "Kore", "-o", "demo.wav"])
 
         self.assertEqual(result.exit_code, 0)
-        self.assertEqual(captured["prompt"], "总结录音内容")
-        self.assertEqual(captured["audio_file"], "demo.m4a")
-        self.assertIsNone(captured["output"])
-        self.assertTrue(callable(captured["stream_handler"]))
-        self.assertIn("输出内容", result.output)
+        self.assertEqual(captured["prompt"], "朗读这句话")
+        self.assertEqual(captured["voice"], "Kore")
+        self.assertEqual(captured["output"], "demo.wav")
+        self.assertIn("已写入: demo.wav", result.output)
 
-    def test_audio_command_requires_reference_audio_file(self):
-        runner = CliRunner()
-        result = runner.invoke(cli, ["audio", "总结录音内容"])
-        self.assertNotEqual(result.exit_code, 0)
-
-    def test_audio_command_passes_provider_to_create_client(self):
+    def test_tts_command_passes_provider_to_create_client(self):
         captured = {}
 
         def fake_create_client(mode, explicit_model=None, explicit_provider=None):
@@ -298,20 +328,19 @@ class ChatSessionTests(unittest.TestCase):
             return object(), "test-model", {}
 
         def fake_run_task(mode, client, model, **kwargs):
-            kwargs["stream_handler"]("输出内容")
-            return {"mode": mode, "text": "输出内容", "printed": True}
+            return {"mode": mode, "output_path": "demo.wav", "printed": False}
 
         runner = CliRunner()
         with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
             result = runner.invoke(
                 cli,
-                ["audio", "总结录音内容", "-r", "demo.m4a", "--provider", "vertexai2api", "--model", "google/gemini-2.5-flash"],
+                ["tts", "朗读这句话", "--provider", "new", "--model", "vertex/gemini-3.1-flash-tts-preview", "-o", "demo.wav"],
             )
 
         self.assertEqual(result.exit_code, 0)
-        self.assertEqual(captured["mode"], "audio")
-        self.assertEqual(captured["explicit_provider"], "vertexai2api")
-        self.assertEqual(captured["explicit_model"], "google/gemini-2.5-flash")
+        self.assertEqual(captured["mode"], "tts")
+        self.assertEqual(captured["explicit_provider"], "new")
+        self.assertEqual(captured["explicit_model"], "vertex/gemini-3.1-flash-tts-preview")
 
     def test_build_messages_chat_inlines_text_and_keeps_image_url_references(self):
         from llm_cli.messages import build_messages
@@ -371,19 +400,23 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(content[0]["image_url"]["url"], "https://cdn.example.com/ref.png?sign=1")
         self.assertEqual(content[1], {"type": "text", "text": "保留主体重绘"})
 
-    def test_build_messages_audio_file_part_includes_mime_type(self):
+    def test_build_messages_chat_accepts_audio_file_reference(self):
         from llm_cli.messages import build_messages
 
-        with patch("llm_cli.messages.load_binary_attachment") as mock_load:
+        with patch("llm_cli.messages.load_binary_attachment") as mock_load, patch(
+            "llm_cli.messages.is_audio_attachment", return_value=True
+        ), patch("llm_cli.messages.is_image_attachment", return_value=False), patch(
+            "llm_cli.messages.is_text_attachment", return_value=False
+        ):
             mock_load.return_value = {"path": "/tmp/demo.m4a", "mime_type": "audio/mp4", "base64_data": "QQ=="}
-            messages = build_messages("audio", prompt="请输出标准 SRT 字幕", audio_path="/tmp/demo.m4a")
+            messages = build_messages("chat", prompt="请转写这段录音", reference_path=["/tmp/demo.m4a"])
 
         content = messages[0]["content"]
-        self.assertEqual(content[0]["type"], "file")
-        self.assertEqual(content[0]["file"]["filename"], "demo.m4a")
-        self.assertEqual(content[0]["file"]["mime_type"], "audio/mp4")
-        self.assertEqual(content[0]["file"]["file_data"], "data:audio/mp4;base64,QQ==")
-        self.assertEqual(content[1], {"type": "text", "text": "请输出标准 SRT 字幕"})
+        self.assertEqual(content[0], {"type": "text", "text": "请转写这段录音"})
+        self.assertEqual(content[1]["type"], "file")
+        self.assertEqual(content[1]["file"]["filename"], "demo.m4a")
+        self.assertEqual(content[1]["file"]["mime_type"], "audio/mp4")
+        self.assertEqual(content[1]["file"]["file_data"], "data:audio/mp4;base64,QQ==")
 
     def test_build_messages_grok2api_image_uses_image_url_parts_for_references(self):
         from llm_cli.messages import build_messages
@@ -1348,7 +1381,7 @@ tasks:
             "modes": {
                 "chat": {"provider": "openai", "model": "chat-model"},
                 "image": {"provider": "openai", "model": "image-model"},
-                "audio": {"provider": "openai", "model": "audio-model"},
+                "tts": {"provider": "openai", "model": "tts-model"},
             },
             "providers": {
                 "openai": {
@@ -1357,7 +1390,7 @@ tasks:
                     "models": {
                         "chat-model": {"type": "chat"},
                         "image-model": {"type": "image"},
-                        "audio-model": {"type": "audio"},
+                        "tts-model": {"type": "tts"},
                     },
                 }
             },
@@ -1366,7 +1399,7 @@ tasks:
         self.assertEqual(resolve_mode_settings("chat", config)["model"], "chat-model")
         self.assertEqual(resolve_mode_settings("text", config)["model"], "chat-model")
         self.assertEqual(resolve_mode_settings("image", config)["model"], "image-model")
-        self.assertEqual(resolve_mode_settings("audio", config)["model"], "audio-model")
+        self.assertEqual(resolve_mode_settings("tts", config)["model"], "tts-model")
 
     def test_resolve_model_falls_back_to_global_model(self):
         from llm_cli.config import resolve_mode_settings
@@ -1387,7 +1420,7 @@ tasks:
 
         self.assertEqual(resolve_mode_settings("chat", config)["model"], "global-model")
         self.assertEqual(resolve_mode_settings("image", config)["model"], "global-model")
-        self.assertEqual(resolve_mode_settings("audio", config)["model"], "global-model")
+        self.assertEqual(resolve_mode_settings("tts", config)["model"], "global-model")
 
     def test_load_runtime_config_uses_new_default_paths_and_expands_env_placeholders(self):
         from llm_cli.config import load_runtime_config
@@ -2741,6 +2774,35 @@ providers:
             )
 
         self.assertEqual(result["task_id"], "vid_abc")
+
+    def test_batch_tts_task_passes_voice_and_default_output_to_run_task(self):
+        from llm_cli.batch import run_batch
+
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-tts-model", {"BASE_URL": "https://example.com/v1"}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["voice"] = kwargs["voice"]
+            captured["output"] = kwargs["output"]
+            return {"mode": mode, "output_path": kwargs["output"], "printed": False}
+
+        yaml_content = """\
+mode: tts
+tasks:
+  - prompt: "朗读这段话"
+    voice: Kore
+"""
+
+        with TemporaryDirectory() as tmp:
+            yaml_path = Path(tmp) / "tasks.yaml"
+            yaml_path.write_text(yaml_content, encoding="utf-8")
+            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                run_batch(str(yaml_path))
+
+        self.assertEqual(captured["voice"], "Kore")
+        self.assertEqual(captured["output"], str((Path(tmp) / "gemini-output" / "tts-1.wav").resolve()))
 
     def test_batch_video_task_passes_seconds_and_size_to_run_task(self):
         from llm_cli.batch import run_batch

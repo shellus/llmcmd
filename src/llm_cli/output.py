@@ -3,6 +3,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+import wave
 from datetime import datetime
 from pathlib import Path
 
@@ -203,6 +204,17 @@ def write_text_output(output_path, text):
     return str(path)
 
 
+def write_wav_output(output_path, pcm_bytes, *, channels=1, rate=24000, sample_width=2):
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(channels)
+        wav_file.setsampwidth(sample_width)
+        wav_file.setframerate(rate)
+        wav_file.writeframes(pcm_bytes)
+    return str(path)
+
+
 def default_output_path(mode, source_path=None):
     if mode == "image":
         target_dir = Path.cwd() / "gemini-output"
@@ -214,8 +226,9 @@ def default_output_path(mode, source_path=None):
         target_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return str(target_dir / f"output_{timestamp}.mp4")
-    if mode == "audio":
-        if not source_path:
-            fail("audio 模式缺少输入文件，无法推导默认输出路径")
-        return str(Path(source_path).with_suffix(".srt"))
+    if mode == "tts":
+        target_dir = Path.cwd() / "gemini-output"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return str(target_dir / f"output_{timestamp}.wav")
     return None

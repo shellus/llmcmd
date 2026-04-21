@@ -1,7 +1,7 @@
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .api import api_call, create_video_task, get_video_task
+from .api import api_call, create_video_task, generate_tts_content, get_video_task
 from .config import get_mode_concurrency
 from .messages import DEFAULT_EDIT_PROMPT, build_messages
 from .output import (
@@ -12,6 +12,7 @@ from .output import (
     extract_video_result,
     response_has_images,
     write_text_output,
+    write_wav_output,
 )
 from .reference_transport import prepare_reference_resources
 from .utils import read_input_files, read_text_file, resolve_path, resolve_text
@@ -47,6 +48,7 @@ def run_task(
     input_paths=None,
     reference=None,
     audio_file=None,
+    voice=None,
     output=None,
     temperature=None,
     max_output_tokens=None,
@@ -84,11 +86,15 @@ def run_task(
         input_text = "\n\n".join(part for part in [edit_source_text, input_text] if part and part.strip())
 
     reference_path = None
-    if reference:
+    if reference and mode in {"image", "video"}:
         raw_references = list(reference) if isinstance(reference, (list, tuple)) else [reference]
         prepared_references = prepare_reference_resources(raw_references, config=config, base_dir=base_dir)
         reference_path = prepared_references["local_paths"]
         reference_urls = prepared_references["url_references"]
+    elif reference:
+        raw_references = list(reference) if isinstance(reference, (list, tuple)) else [reference]
+        reference_path = [str(resolve_path(item, base_dir=base_dir)) for item in raw_references]
+        reference_urls = []
     else:
         reference_urls = []
     if mode == "image" and reference:
@@ -99,7 +105,7 @@ def run_task(
     if audio_file:
         audio_path = str(resolve_path(audio_file, base_dir=base_dir))
 
-    if messages is None and mode != "video":
+    if messages is None and mode not in {"video", "tts"}:
         messages = build_messages(
             effective_mode,
             prompt=prompt_text,
@@ -123,6 +129,35 @@ def run_task(
                 "modalities": ["image", "text"],
                 "image_config": image_config,
             }
+
+    if mode == "tts":
+        if not prompt_text:
+            raise ValueError("tts 模式至少需要 prompt")
+        output_path = output or default_output_path("tts")
+        output_path = str(resolve_path(output_path, base_dir=base_dir)) if output else output_path
+        response = generate_tts_content(
+            client,
+            model=request_model,
+            prompt=prompt_text,
+            voice=voice,
+            config=config,
+        )
+        candidate = ((response or {}).get("candidates") or [{}])[0]
+        content = candidate.get("content") or {}
+        parts = content.get("parts") or []
+        inline_data = None
+        for part in parts:
+            inline_data = part.get("inlineData") or part.get("inline_data")
+            if inline_data:
+                break
+        if not inline_data:
+            raise ValueError("tts 响应缺少 inlineData")
+        audio_b64 = inline_data.get("data")
+        if not audio_b64:
+            raise ValueError("tts 响应缺少音频数据")
+        pcm_bytes = __import__("base64").b64decode(audio_b64)
+        saved_path = write_wav_output(output_path, pcm_bytes)
+        return {"mode": mode, "output_path": saved_path, "printed": False}
 
     if mode == "video":
         output_path = output or default_output_path("video")
@@ -240,13 +275,6 @@ def run_task(
         return {"mode": mode, "output_paths": saved_paths, "printed": False}
 
     text = extract_text_result(response)
-    if mode == "audio":
-        if output:
-            output_path = str(resolve_path(output, base_dir=base_dir))
-            saved_path = write_text_output(output_path, text)
-            return {"mode": mode, "text": text, "output_path": saved_path, "printed": False}
-        return {"mode": mode, "text": text, "printed": True}
-
     if edit_source_path:
         updated_text = apply_search_replace_blocks(edit_source_text, text)
         target_path = output or str(edit_source_path)

@@ -19,7 +19,7 @@
   |
   | 1. 先读取命令启动时已有的环境变量
   |    例如:
-  |    CHAT_MODEL / IMAGE_MODEL / AUDIO_MODEL / VIDEO_MODEL / MODEL
+  |    CHAT_MODEL / IMAGE_MODEL / TTS_MODEL / VIDEO_MODEL / MODEL
   |    BASE_URL / API_KEY
   |
   v
@@ -40,7 +40,7 @@
 [按 mode 解析 provider / model / protocol / reference_transport]
   |
   v
-[创建 OpenAI 兼容客户端并执行命令]
+[创建客户端并执行命令]
 ```
 
 ## 最终优先级
@@ -59,7 +59,7 @@
 
 - `chat`：`--model` > `CHAT_MODEL` > `MODEL` > `modes.chat.model` > `default_model`
 - `image`：`--model` > `IMAGE_MODEL` > `MODEL` > `modes.image.model` > `default_model`
-- `audio`：`--model` > `AUDIO_MODEL` > `MODEL` > `modes.audio.model` > `default_model`
+- `tts`：`--model` > `TTS_MODEL` > `MODEL` > `modes.tts.model` > `default_model`
 - `video`：`--model` > `VIDEO_MODEL` > `MODEL` > `modes.video.model` > `default_model`
 
 ### provider
@@ -81,7 +81,7 @@ BASE_URL > providers.<selected>.base_url
 API_KEY  > providers.<selected>.api_key
 ```
 
-`BASE_URL` 与 `API_KEY` 是对当前命令整体生效的覆盖，不区分 `chat / image / audio / video`。
+`BASE_URL` 与 `API_KEY` 是对当前命令整体生效的覆盖，不区分 `chat / image / tts / video`。
 
 ### `.env` 与进程环境
 
@@ -123,9 +123,9 @@ modes:
   image:
     provider: openai
     model: gpt-image-1
-  audio:
-    provider: openai
-    model: gpt-4o-transcribe
+  tts:
+    provider: gemini
+    model: gemini-3.1-flash-tts-preview
   video:
     provider: reverse-video
     model: sora_t2v_turbo
@@ -140,8 +140,14 @@ providers:
         alias: chat-default
       gpt-image-1:
         type: image
-      gpt-4o-transcribe:
-        type: audio
+
+  gemini:
+    base_url: https://generativelanguage.googleapis.com
+    api_key: ${OPENAI_API_KEY}
+    models:
+      gemini-3.1-flash-tts-preview:
+        type: tts
+        protocol: gemini-generate-content
 
   reverse-video:
     base_url: https://your-newapi.example.com/v1
@@ -187,7 +193,7 @@ llm chat "你好，输出一句测试文本"
 - `modes.<mode>.model`：该 mode 的默认模型
 - `modes.<mode>.protocol`：该 mode 的默认协议
 - `modes.<mode>.reference_transport`：该 mode 默认使用的参考文件传输方式
-- `providers.<name>.base_url`：上游 OpenAI 兼容接口地址
+- `providers.<name>.base_url`：上游接口地址
 - `providers.<name>.api_key`：上游鉴权密钥
 - `providers.<name>.models.<model_name>`：模型定义
 - `providers.<name>.models.<model_name>.type`：模型所属 mode
@@ -201,13 +207,15 @@ llm chat "你好，输出一句测试文本"
 
 - `openai-chat-completions`
 - `grok2api-image`
+- `gemini-generate-content`
 - `openai-videos`
 - `unified-video`
 
 说明：
 
-- `openai-chat-completions`：通过 `POST /v1/chat/completions` 承载 `chat / image / audio`
+- `openai-chat-completions`：通过 `POST /v1/chat/completions` 承载 `chat / image`
 - `grok2api-image`：图片模式专用变体，仍走 `POST /v1/chat/completions`，但参考图按 `image_url` 发送，结果优先从 `message.content` 提取图片 URL
+- `gemini-generate-content`：通过 Gemini 原生 `POST /v1beta/models/{model}:generateContent` 承载 `tts`
 - `openai-videos`：视频模式走 `POST /v1/videos`
 - `unified-video`：视频模式走兼容网关的统一视频接口
 
@@ -219,7 +227,7 @@ llm chat "你好，输出一句测试文本"
 
 - `CHAT_MODEL`
 - `IMAGE_MODEL`
-- `AUDIO_MODEL`
+- `TTS_MODEL`
 - `VIDEO_MODEL`
 - `MODEL`
 - `BASE_URL`
@@ -231,6 +239,7 @@ llm chat "你好，输出一句测试文本"
 ```bash
 CHAT_MODEL=gpt-5.4 llm chat "用更强模型重写这段文案"
 IMAGE_MODEL=gemini-2.5-flash-image-preview llm image "生成一张横版海报" -o banner.jpg
+TTS_MODEL=gemini-3.1-flash-tts-preview llm tts "请朗读一句欢迎词" -o welcome.wav
 BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test CHAT_MODEL=gpt-5.4 llm chat "输出一句自检文本"
 BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test IMAGE_MODEL=seedream-4.0 llm image "生成产品主图" -o hero.jpg
 ```

@@ -1,6 +1,6 @@
 ---
 name: llmcmd
-description: Use when handling terminal-first LLM workflows for text generation, image generation, audio transcription, video generation, YAML batch tasks, persistent chat sessions, or file-based prompt and reference inputs.
+description: Use when handling terminal-first LLM workflows for text generation, image generation, audio understanding via chat references, text-to-speech generation, video generation, YAML batch tasks, persistent chat sessions, or file-based prompt and reference inputs.
 ---
 
 # llmcmd
@@ -13,11 +13,11 @@ description: Use when handling terminal-first LLM workflows for text generation,
 
 在以下场景使用本技能：
 
-- 需要把文本、图片、音频、视频能力统一接入 shell、脚本、自动化流程或 CI
+- 需要把文本、图片、音频理解、文本转语音、视频能力统一接入 shell、脚本、自动化流程或 CI
 - 需要读取本地文本、图片、文档、音频作为 prompt 或参考输入
 - 需要用 `chat --edit` 按要求直接修改文本文件
 - 需要在终端里持久化会话并继续同一轮对话
-- 需要通过 YAML 一次编排多条 `chat / image / audio / video` 任务
+- 需要通过 YAML 一次编排多条 `chat / image / tts / video` 任务
 
 ## 安装
 
@@ -35,10 +35,10 @@ llm
 
 | 模式 | 用途 | 常用输入 | 常用输出 |
 |------|------|----------|----------|
-| `llm chat` | 文本生成、分析、问答、改写、编辑文件、持久对话 | prompt、`@文件`、`-r` 附件、会话文件 | stdout、文本文件、会话文件 |
+| `llm chat` | 文本生成、分析、问答、改写、编辑文件、持久对话、音频理解 | prompt、`@文件`、`-r` 附件、会话文件 | stdout、文本文件、会话文件 |
 | `llm agent` | 启动 `pi` coding agent，并复用当前 `chat` 配置 | prompt、`--thinking`、`--session`、`--tools` | `pi` 交互会话 |
 | `llm image` | 图片生成、参考图编辑 | prompt、`@文件`、`-r` 附件 | 图片文件 |
-| `llm audio` | 音频转写、总结、字幕 | prompt、音频附件 | stdout、文本文件、字幕文件 |
+| `llm tts` | 文本转语音 | prompt、`@文件`、`--voice` | wav 文件 |
 | `llm video` | 异步视频生成、恢复等待、自动下载 | prompt、首帧参考图、任务 ID | 视频文件 |
 | `llm batch` | YAML 批量任务编排 | `tasks.yaml` | 输出目录内多个结果 |
 
@@ -49,6 +49,7 @@ llm
 ```bash
 llm chat "写一段产品介绍"
 llm image "生成横版海报"
+llm tts "请朗读这段欢迎词"
 llm video "生成一段海边航拍视频"
 ```
 
@@ -59,6 +60,7 @@ llm video "生成一段海边航拍视频"
 ```bash
 llm chat @prompt.txt -o result.md
 llm image @prompt.md -o result.jpg
+llm tts @script.txt -o speech.wav
 ```
 
 ### 3. 使用 `-r/--reference`
@@ -68,20 +70,20 @@ llm image @prompt.md -o result.jpg
 ```bash
 llm chat "总结这个附件的重点" -r report.pdf
 llm chat "对比两张参考图后总结共同特征" -r photo-a.jpg -r photo-b.jpg
+llm chat "请转写这段录音" -r meeting.mp3
 llm image "融合两张参考图的风格生成图片" -r person.jpg -r style.jpg -o result.jpg
-llm audio "总结录音内容" -r meeting.m4a
 llm video "生成产品展示短片" -r first-frame.jpg --seconds 8 -o demo.mp4
 ```
 
 补充规则：
 
-- `chat` 中，图片参考会作为图片输入，文本类附件优先内联为文本
-- `image / audio` 中，参考输入按文件附件处理
+- `chat` 中，图片参考会作为图片输入，文本类附件优先内联为文本，音频附件按 `file` 发送
+- `image` 中，参考输入按文件附件处理
 - `video` 当前仅使用第一张参考图作为首帧参考
 
 ## `llm chat`
 
-用于文本生成、分析、问答、改写、结构化提取、文件编辑与持久化对话。
+用于文本生成、分析、问答、改写、结构化提取、文件编辑、持久化对话，以及音频理解。
 
 ### 基本示例
 
@@ -89,6 +91,7 @@ llm video "生成产品展示短片" -r first-frame.jpg --seconds 8 -o demo.mp4
 llm chat "写一段产品介绍"
 llm chat @prompt.txt -o result.md
 llm chat "总结重点" -r article.md -r notes.pdf
+llm chat "请转写这段录音并输出标准 SRT 字幕" -r demo.wav -o demo.srt
 llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
 ```
 
@@ -100,12 +103,6 @@ llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
 llm chat "把人物脸型改成偏瘦，不要改动其他描述" --edit prompt.md
 llm chat "按要求改写" --edit prompt.md -o prompt.v2.md
 ```
-
-适用场景：
-
-- 改写提示词
-- 修正文案
-- 在保留原结构的前提下做局部调整
 
 ### 持久化会话
 
@@ -133,6 +130,7 @@ llm chat -I -s ./sessions/product-review.jsonl
 - `-I` 模式下只有配合 `-s` 才会回放历史并持续写回；不带 `-s` 时为纯内存会话
 - 当前持久会话聚焦连续文本对话，不与 `-r/--edit` 组合
 - `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只覆盖会话开头连续的 system 消息
+- `audio` 子命令已删除；音频理解统一使用 `llm chat -r`
 
 交互式内置命令：
 
@@ -212,26 +210,23 @@ llm image "生成横版海报" --size 2K --aspect 16:9 -o banner.jpg
 - `-r/--reference` 默认按 `type=file` 发送；当配置了 `reference_transport` 且图片参考已预上传为 URL 时，会优先改用 `image_url`
 - `--provider` 与 `--model` 同时使用时，会优先在该 provider 下解析模型别名；未命中时直接按原始模型名发送
 
-## `llm audio`
+## `llm tts`
 
-用于把音频送入模型处理，可做转写、总结、字幕生成。
+用于文本转语音，输出 wav 文件。
 
 ### 基本示例
 
 ```bash
-llm audio -r demo.m4a
-llm audio "总结录音内容" -r demo.m4a
-llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
+llm tts "请用温和语气朗读这段话" -o demo.wav
+llm tts @prompt.txt --voice Kore -o demo.wav
 ```
 
 说明：
 
-- `--provider` 可临时覆盖当前 audio 模式使用的 provider
+- `--provider` 可临时覆盖当前 tts 模式使用的 provider
 - `--model` 与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名；未命中时直接按原始模型名发送
-- 位置参数是 prompt
-- `-r/--reference` 上传音频附件
-- 默认实时输出到 stdout，仅在传 `-o` 时写文件
-- 若要 SRT，请直接在 prompt 中明确要求
+- `--voice` 用于指定 Gemini 预置音色名，例如 `Kore`
+- 当前通过 Gemini 原生 `generateContent` 返回音频 PCM，再封装为 wav
 
 ## `llm video`
 
@@ -296,9 +291,10 @@ tasks:
     aspect: "16:9"
     output: hero.jpg
 
-  - mode: audio
-    audio_file: meeting.mp3
-    prompt: "请输出标准 SRT 字幕"
+  - mode: tts
+    prompt: "请朗读这段欢迎词"
+    voice: Kore
+    output: welcome.wav
 
   - mode: video
     prompt: "生成一段产品宣传短片"
@@ -314,7 +310,7 @@ tasks:
 - 顶层 `mode` 可为任务提供默认模式
 - 单个任务可通过 `mode` 覆盖默认值
 - 如果定义了 `output`，始终以 `output` 为准
-- 图片和视频任务未定义 `output` 时，会按任务序号自动命名为 `image-1.jpg`、`video-2.mp4`
+- 图片、语音、视频任务未定义 `output` 时，会按任务序号自动命名为 `image-1.jpg`、`tts-2.wav`、`video-3.mp4`
 - `aspect` 建议写成带引号的字符串，例如 `"16:9"`，避免 YAML 误解析
 
 ## 配置
@@ -364,9 +360,9 @@ modes:
   image:
     provider: openai
     model: gpt-image-1
-  audio:
+  tts:
     provider: openai
-    model: gpt-4o-transcribe
+    model: gemini-3.1-flash-tts-preview
   video:
     provider: reverse-video
     model: sora_t2v_turbo
@@ -380,8 +376,9 @@ providers:
         type: chat
       gpt-image-1:
         type: image
-      gpt-4o-transcribe:
-        type: audio
+      gemini-3.1-flash-tts-preview:
+        type: tts
+        protocol: gemini-generate-content
 
   reverse-video:
     base_url: https://your-newapi.example.com/v1
@@ -427,9 +424,9 @@ modes:
   image:
     provider: openai
     model: gpt-image-1
-  audio:
+  tts:
     provider: openai
-    model: gpt-4o-transcribe
+    model: gemini-3.1-flash-tts-preview
   video:
     provider: reverse-video
     model: sora_t2v_turbo
@@ -444,8 +441,9 @@ providers:
         alias: chat-default
       gpt-image-1:
         type: image
-      gpt-4o-transcribe:
-        type: audio
+      gemini-3.1-flash-tts-preview:
+        type: tts
+        protocol: gemini-generate-content
 
   reverse-video:
     base_url: https://your-newapi.example.com/v1
@@ -481,7 +479,7 @@ reference_transports:
 - `modes.<mode>`：声明每个 CLI mode 默认使用哪个 provider、哪个真实模型
 - `providers.<name>`：声明上游的 `base_url`、`api_key`
 - `providers.<name>.models.<model_name>`：声明模型的 `type / alias / protocol / reference_transport / defaults`
-- `protocol` 当前支持 `openai-chat-completions`、`grok2api-image`、`openai-videos` 与 `unified-video`
+- `protocol` 当前支持 `openai-chat-completions`、`grok2api-image`、`gemini-generate-content`、`openai-videos` 与 `unified-video`
 - `reference_transport` 可把本地参考文件先上传到命名的 S3 兼容存储，再将 URL 提供给上游
 - `reference_transports.<name>`：声明可复用的 S3 兼容上传目标
 - `alias` 可将 CLI 中使用的短名称映射到真实模型名
@@ -495,6 +493,7 @@ reference_transports:
 ```bash
 CHAT_MODEL=gpt-5.4 llm chat "用更强模型重写这段文案"
 IMAGE_MODEL=gemini-2.5-flash-image-preview llm image "生成一张横版海报" -o banner.jpg
+TTS_MODEL=gemini-3.1-flash-tts-preview llm tts "请朗读一句欢迎词" -o welcome.wav
 BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test CHAT_MODEL=gpt-5.4 llm chat "输出一句自检文本"
 BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test IMAGE_MODEL=seedream-4.0 llm image "生成产品主图" -o hero.jpg
 ```
@@ -503,7 +502,7 @@ BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test IMAGE_MODEL=seedream-4.0
 
 - `CHAT_MODEL`：覆盖 `chat` 默认模型
 - `IMAGE_MODEL`：覆盖 `image` 默认模型
-- `AUDIO_MODEL`：覆盖 `audio` 默认模型
+- `TTS_MODEL`：覆盖 `tts` 默认模型
 - `VIDEO_MODEL`：覆盖 `video` 默认模型
 - `MODEL`：作为通用模型覆盖；未设置 mode 专属变量时生效
 - `BASE_URL`：临时覆盖当前 provider 的 `base_url`
@@ -513,7 +512,7 @@ BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test IMAGE_MODEL=seedream-4.0
 
 - 这类覆盖不会修改任何配置文件，命令结束后即失效
 - 如果同时设置了 mode 专属变量和 `MODEL`，优先使用 mode 专属变量
-- `BASE_URL` 与 `API_KEY` 是对当前命令整体生效，不区分 `chat / image / audio / video`
+- `BASE_URL` 与 `API_KEY` 是对当前命令整体生效，不区分 `chat / image / tts / video`
 
 ## 常见工作流
 
@@ -538,17 +537,23 @@ llm image "生成三张海报方案" -n 3 -o poster.jpg
 ### 4. 转写录音并输出字幕
 
 ```bash
-llm audio "请输出标准 SRT 字幕" -r demo.m4a -o demo.srt
+llm chat "请输出标准 SRT 字幕" -r demo.wav -o demo.srt
 ```
 
-### 5. 创建并恢复视频任务
+### 5. 生成配音音频
+
+```bash
+llm tts "请朗读这段欢迎词" --voice Kore -o welcome.wav
+```
+
+### 6. 创建并恢复视频任务
 
 ```bash
 llm video "生成产品展示短片" -r first-frame.jpg --seconds 8 -o demo.mp4
 llm video --resume vid_123 -o demo.mp4
 ```
 
-### 6. 继续同一轮对话
+### 7. 继续同一轮对话
 
 ```bash
 llm chat "继续上次方案" -s worklog
@@ -560,7 +565,7 @@ llm chat -I -s worklog
 - 把长文本直接硬编码到命令里，而不是用 `@文件`
 - 需要多轮对话却没用 `-s`，导致上下文无法复用
 - 在 YAML 里把 `aspect` 写成未加引号的 `16:9`，被 YAML 误解析
-- 期待 `audio` 自动输出 SRT，但 prompt 没明确要求字幕格式
+- 期待字幕输出，但 prompt 没明确要求字幕格式
 - 忘记 `video` 是异步任务，未记录任务 ID
 - 把域名、密钥、账号写进版本控制文件，而不是放进 `.env`
 

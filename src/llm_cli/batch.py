@@ -22,7 +22,7 @@ def normalize_mode(value, field_name="mode"):
     if value == "text":
         value = "chat"
     if value not in MODE_ALIASES:
-        fail(f"{field_name} 必须是 chat / image / audio / video，当前为: {value}")
+        fail(f"{field_name} 必须是 chat / image / tts / video，当前为: {value}")
     return value
 
 
@@ -59,11 +59,13 @@ def validate_task_fields(mode, task, index):
             fail(
                 f"第 {index} 个 image task 的 aspect 必须是 {', '.join(IMAGE_ASPECT_CHOICES)}，当前为: {image_aspect_ratio}{hint}"
             )
-    elif mode == "audio":
-        if not task.get("audio_file"):
-            fail(f"第 {index} 个 audio task 缺少 audio_file")
+    elif mode == "tts":
+        if not task.get("prompt"):
+            fail(f"第 {index} 个 tts task 缺少 prompt")
         if task.get("reference"):
-            fail(f"第 {index} 个 audio task 不支持 reference")
+            fail(f"第 {index} 个 tts task 不支持 reference")
+        if task.get("audio_file"):
+            fail(f"第 {index} 个 tts task 不支持 audio_file")
     elif mode == "video":
         if not task.get("prompt") and not task.get("resume_task_id"):
             fail(f"第 {index} 个 video task 缺少 prompt 或 resume_task_id")
@@ -108,12 +110,12 @@ def resolve_task_output(mode, task, output_dir, yaml_dir, index):
         base_dir = Path(output_dir).resolve() if output_dir else (yaml_dir / "gemini-output").resolve()
         return str(base_dir / f"image-{index}.jpg")
 
-    if mode == "audio":
-        audio_path = resolve_path(task["audio_file"], base_dir=yaml_dir)
-        return str(audio_path.with_suffix(".srt"))
     if mode == "video":
         base_dir = Path(output_dir).resolve() if output_dir else (yaml_dir / "gemini-output").resolve()
         return str(base_dir / f"video-{index}.mp4")
+    if mode == "tts":
+        base_dir = Path(output_dir).resolve() if output_dir else (yaml_dir / "gemini-output").resolve()
+        return str(base_dir / f"tts-{index}.wav")
 
     return None
 
@@ -161,9 +163,9 @@ def run_batch(yaml_path_str: str, explicit_provider=None):
     global_max_output_tokens = data.get("max_output_tokens")
     global_input = data.get("input")
     global_reference = data.get("reference")
-    global_audio_file = data.get("audio_file")
     global_edit = data.get("edit")
     global_model = data.get("model")
+    global_voice = data.get("voice")
 
     prepared = []
     modes = set()
@@ -180,12 +182,12 @@ def run_batch(yaml_path_str: str, explicit_provider=None):
             "system_prompt": task.get("system_prompt", global_system_prompt),
             "input_paths": input_paths,
             "reference": task.get("reference", global_reference),
-            "audio_file": task.get("audio_file", global_audio_file),
             "edit_path": task.get("edit", global_edit),
             "output": None,
             "temperature": task.get("temperature", global_temperature),
             "max_output_tokens": task.get("max_output_tokens", global_max_output_tokens),
             "model": task.get("model", global_model),
+            "voice": task.get("voice", global_voice),
             "count": task.get("count", 1),
             "image_size": task.get("size"),
             "image_aspect_ratio": task.get("aspect"),
@@ -248,12 +250,12 @@ def run_batch(yaml_path_str: str, explicit_provider=None):
             system_prompt=task_spec["system_prompt"],
             input_paths=task_spec["input_paths"],
             reference=task_spec["reference"],
-            audio_file=task_spec["audio_file"],
             output=task_spec["output"],
             temperature=task_spec["temperature"],
             max_output_tokens=task_spec["max_output_tokens"],
             base_dir=yaml_dir,
             edit_path=task_spec["edit_path"],
+            voice=task_spec.get("voice"),
             image_count=task_spec["count"],
             image_size=task_spec["image_size"],
             image_aspect_ratio=task_spec["image_aspect_ratio"],

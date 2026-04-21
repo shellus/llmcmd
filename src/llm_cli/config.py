@@ -178,7 +178,7 @@ def _runtime_model_override(mode):
         "chat": ["CHAT_MODEL", "MODEL"],
         "text": ["CHAT_MODEL", "MODEL"],
         "image": ["IMAGE_MODEL", "MODEL"],
-        "audio": ["AUDIO_MODEL", "MODEL"],
+        "tts": ["TTS_MODEL", "MODEL"],
         "video": ["VIDEO_MODEL", "MODEL"],
     }
     for name in env_names.get(mode, []):
@@ -191,8 +191,10 @@ def _runtime_model_override(mode):
 def _default_protocol_for_mode(mode):
     if mode == "video":
         return "openai-videos"
-    if mode in {"chat", "image", "audio"}:
+    if mode in {"chat", "image"}:
         return "openai-chat-completions"
+    if mode == "tts":
+        return "gemini-generate-content"
     return f"openai-{mode}"
 
 
