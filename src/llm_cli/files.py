@@ -39,6 +39,19 @@ def detect_mime_type(file_path, expected_kind=None):
             ".webm": "audio/webm",
         }
         return ext_map.get(Path(file_path).suffix.lower())
+    if expected_kind == "video":
+        if mime_type and mime_type.startswith("video/"):
+            return mime_type
+        ext_map = {
+            ".mp4": "video/mp4",
+            ".mov": "video/quicktime",
+            ".webm": "video/webm",
+            ".avi": "video/x-msvideo",
+            ".mkv": "video/x-matroska",
+            ".mpeg": "video/mpeg",
+            ".mpg": "video/mpeg",
+        }
+        return ext_map.get(Path(file_path).suffix.lower())
     return mime_type or "application/octet-stream"
 
 
@@ -48,6 +61,10 @@ def is_image_attachment(file_path):
 
 def is_audio_attachment(file_path):
     return bool(detect_mime_type(file_path, expected_kind="audio"))
+
+
+def is_video_attachment(file_path):
+    return bool(detect_mime_type(file_path, expected_kind="video"))
 
 
 def is_text_attachment(file_path):

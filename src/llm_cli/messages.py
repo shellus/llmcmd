@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .files import is_audio_attachment, is_image_attachment, is_text_attachment, load_binary_attachment, read_text_attachment
+from .files import is_audio_attachment, is_image_attachment, is_text_attachment, is_video_attachment, load_binary_attachment, read_text_attachment
 from .utils import fail, join_message_parts
 
 DEFAULT_EDIT_PROMPT = """你是一个严谨的文本编辑助手。你会收到一份原始文件内容，以及用户的修改要求。
@@ -97,6 +97,8 @@ def build_messages(
                 content.append(_build_image_url_part(path))
             elif is_text_attachment(path):
                 content.append(_build_text_attachment_part(path))
+            elif is_video_attachment(path):
+                fail(f"chat edit 模式暂不支持视频附件: {path}")
             else:
                 fail(f"chat edit 模式暂不支持该附件类型: {path}")
         messages.append({"role": "user", "content": content})
@@ -115,6 +117,8 @@ def build_messages(
                     content.append(_build_image_url_part(path))
                 elif is_audio_attachment(path):
                     content.append(_build_file_part(path, expected_kind="audio"))
+                elif is_video_attachment(path):
+                    content.append(_build_file_part(path, expected_kind="video"))
                 elif is_text_attachment(path):
                     content.append(_build_text_attachment_part(path))
                 else:
@@ -131,6 +135,8 @@ def build_messages(
             content = []
             for index, path in enumerate(reference_paths):
                 reference_url = reference_urls[index] if index < len(reference_urls) else None
+                if is_video_attachment(path):
+                    fail(f"image 模式暂不支持视频附件: {path}")
                 if reference_url and is_image_attachment(path):
                     content.append(_build_remote_image_url_part(reference_url))
                 elif protocol == "grok2api-image" and is_image_attachment(path):

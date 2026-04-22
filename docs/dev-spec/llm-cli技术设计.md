@@ -11,9 +11,9 @@
 | 路径 | 责任 |
 |------|------|
 | `src/llm_cli/cli.py` | Click 命令入口，参数定义，命令分发 |
-| `src/llm_cli/config.py` | 读取 `~/.config/llm-api/.env`，解析模型与并发配置，创建 OpenAI 客户端 |
+| `src/llm_cli/config.py` | 读取 `~/.llm/{.env,config.yaml}`，解析模型与并发配置，创建 OpenAI 客户端 |
 | `src/llm_cli/task.py` | 统一任务执行入口，负责把参数转成消息、调用上游、整理输出 |
-| `src/llm_cli/messages.py` | 按 `chat / image / audio / chat_edit` 构造消息体 |
+| `src/llm_cli/messages.py` | 按 `chat / image / chat_edit` 构造消息体 |
 | `src/llm_cli/api.py` | 统一调用 `chat.completions.create(stream=True)`，必要时通过 `extra_body` 透传兼容扩展字段，收集文本与图片等流式结果 |
 | `src/llm_cli/output.py` | 提取文本/图片结果，处理默认输出路径与 edit diff 应用 |
 | `src/llm_cli/batch.py` | 解析 YAML，准备任务规格，并发执行批处理 |
@@ -42,7 +42,7 @@ Click 子命令
 
 这样设计的原因：
 
-- 保持 `chat / image / audio` 三种模式共享同一套 `BASE_URL`、鉴权和流式响应处理
+- 保持 `chat / image` 共享同一套 `BASE_URL`、鉴权和流式响应处理
 - 复用 `cliproxy` 已有的 OpenAI → Gemini 转换逻辑，避免在本项目维护一套 Gemini 专有协议分支
 - 让尺寸与宽高比控制保持为请求级元数据，而不是塞进 prompt 里做弱约束
 
@@ -101,7 +101,8 @@ session.py 读取 JSONL
 配置文件位置：
 
 ```bash
-~/.config/llm-api/.env
+~/.llm/.env
+~/.llm/config.yaml
 ```
 
 关键配置项：
@@ -113,7 +114,8 @@ session.py 读取 JSONL
 | `MODEL` | 通用默认模型 |
 | `CHAT_MODEL` | 文本模式优先模型 |
 | `IMAGE_MODEL` | 图片模式优先模型 |
-| `AUDIO_MODEL` | 音频模式优先模型 |
+| `TTS_MODEL` | 语音模式优先模型 |
+| `VIDEO_MODEL` | 视频模式优先模型 |
 | `LLM_CONCURRENCY` | 全局并发上限 |
 | `OPENAI_CHAT_CONCURRENCY` | 旧版文本并发兼容变量 |
 | `OPENAI_IMAGE_CONCURRENCY` | 旧版图片并发兼容变量 |
@@ -122,12 +124,13 @@ session.py 读取 JSONL
 
 - `chat`：`CHAT_MODEL` → `MODEL`
 - `image`：`IMAGE_MODEL` → `MODEL`
-- `audio`：`AUDIO_MODEL` → `MODEL`
+- `tts`：`TTS_MODEL` → `MODEL`
+- `video`：`VIDEO_MODEL` → `MODEL`
 
 交互式内置命令约束：
 
 - `/clear` 清空当前会话；若当前已绑定持久化会话文件，则同步清空文件内容
-- `/model <name>` 切换当前交互模型，并写回 `~/.config/llm-api/.env` 中的 `CHAT_MODEL`
+- `/model <name>` 切换当前交互模型，并写回 `~/.llm/.env` 中的 `CHAT_MODEL`
 - `/save <name-or-path>` 将当前会话整体保存到指定文件；若当前已持久化且目标不同，则切换到新文件继续写入
 
 ## 消息构造约束
@@ -137,10 +140,10 @@ session.py 读取 JSONL
 当前约束如下：
 
 - `@文件` 用于把 UTF-8 文本直接读入 prompt / system 文本
-- `chat / image / audio` 的 `-r/--reference` 统一表示参考输入
-- `chat` 中图片附件构造成 `image_url`，文本附件先读取后构造成 `text`
-- `image / audio` 继续使用文件型附件输入
-- `chat_edit` 支持文本文件内容 + 修改要求 + 可选附件
+- `chat / image / video` 的 `-r/--reference` 统一表示参考输入
+- `chat` 中图片附件构造成 `image_url`，文本附件先读取后构造成 `text`，音频与视频附件构造成 `file`
+- `image` 继续使用文件型附件输入，但当前显式拒绝视频附件
+- `chat_edit` 支持文本文件内容 + 修改要求 + 可选图片或文本附件，不支持视频附件
 
 新增输入能力时，优先扩展 `build_messages()`，不要在 `cli.py` 或 `task.py` 拼接临时消息结构。
 
@@ -162,9 +165,9 @@ session.py 读取 JSONL
 - `chat` 模式若检测到图片响应，也按图片结果落盘并返回路径，不再把 base64 当文本输出
 - `chat/completions` 路径下不要假设文档附件的 `file_data` 兼容可用；文本类参考输入应优先转成内联文本
 - 如果上游返回 Markdown 图片链接，则回退到正则提取并下载
-- `chat / image / audio` 请求统一走 `stream=True`
+- `chat / image` 请求统一走 `stream=True`
 - `image` 模式如需控制分辨率或宽高比，优先使用顶层 `image_config` 透传给兼容后端
-- 非交互 `chat / audio` 必须把流式文本实时写到 stdout，不允许等完整响应后一次性输出
+- 非交互 `chat` 必须把流式文本实时写到 stdout，不允许等完整响应后一次性输出
 - edit 模式必须保持“唯一定位 + 最小修改”，不能放宽 SEARCH 匹配规则
 
 ## 扩展建议

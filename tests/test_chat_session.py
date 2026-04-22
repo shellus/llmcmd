@@ -22,6 +22,13 @@ class ChatSessionTests(unittest.TestCase):
 
         self.assertEqual(mime_type, "audio/wav")
 
+    def test_detect_mime_type_supports_video_mp4_and_mov(self):
+        from llm_cli.files import detect_mime_type, is_video_attachment
+
+        self.assertEqual(detect_mime_type("demo.mp4", expected_kind="video"), "video/mp4")
+        self.assertEqual(detect_mime_type("demo.mov", expected_kind="video"), "video/quicktime")
+        self.assertTrue(is_video_attachment("demo.mp4"))
+
     def test_api_call_stream_collects_image_deltas(self):
         from llm_cli.api import api_call
 
@@ -417,6 +424,43 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(content[1]["file"]["filename"], "demo.m4a")
         self.assertEqual(content[1]["file"]["mime_type"], "audio/mp4")
         self.assertEqual(content[1]["file"]["file_data"], "data:audio/mp4;base64,QQ==")
+
+    def test_build_messages_chat_accepts_video_file_reference(self):
+        from llm_cli.messages import build_messages
+
+        with patch("llm_cli.messages.load_binary_attachment") as mock_load, patch(
+            "llm_cli.messages.is_video_attachment", return_value=True
+        ), patch("llm_cli.messages.is_audio_attachment", return_value=False), patch(
+            "llm_cli.messages.is_image_attachment", return_value=False
+        ), patch("llm_cli.messages.is_text_attachment", return_value=False):
+            mock_load.return_value = {"path": "/tmp/demo.mp4", "mime_type": "video/mp4", "base64_data": "QQ=="}
+            messages = build_messages("chat", prompt="总结这个视频", reference_path=["/tmp/demo.mp4"])
+
+        content = messages[0]["content"]
+        self.assertEqual(content[0], {"type": "text", "text": "总结这个视频"})
+        self.assertEqual(content[1]["type"], "file")
+        self.assertEqual(content[1]["file"]["filename"], "demo.mp4")
+        self.assertEqual(content[1]["file"]["mime_type"], "video/mp4")
+        self.assertEqual(content[1]["file"]["file_data"], "data:video/mp4;base64,QQ==")
+
+    def test_build_messages_image_rejects_video_reference(self):
+        from llm_cli.messages import build_messages
+
+        with patch("llm_cli.messages.load_binary_attachment") as mock_load, patch(
+            "llm_cli.messages.is_video_attachment", return_value=True
+        ), patch("llm_cli.messages.is_image_attachment", return_value=False):
+            mock_load.return_value = {"path": "/tmp/demo.mp4", "mime_type": "video/mp4", "base64_data": "QQ=="}
+            with self.assertRaises(SystemExit):
+                build_messages("image", prompt="保留主体重绘", reference_path=["/tmp/demo.mp4"])
+
+    def test_build_messages_chat_edit_rejects_video_reference(self):
+        from llm_cli.messages import build_messages
+
+        with patch("llm_cli.messages.is_video_attachment", return_value=True), patch(
+            "llm_cli.messages.is_image_attachment", return_value=False
+        ), patch("llm_cli.messages.is_text_attachment", return_value=False):
+            with self.assertRaises(SystemExit):
+                build_messages("chat_edit", prompt="改写", input_text="原文", reference_path=["/tmp/demo.mp4"])
 
     def test_build_messages_grok2api_image_uses_image_url_parts_for_references(self):
         from llm_cli.messages import build_messages
