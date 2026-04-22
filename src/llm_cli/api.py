@@ -56,8 +56,8 @@ def sanitize_debug_value(value, *, limit=100):
     def walk(node):
         if isinstance(node, dict):
             for key, sub in list(node.items()):
-                if key in {"file_data", "data", "url"} and len(str(sub)) > limit:
-                    node[key] = str(sub)[:50] + f"...<truncated, total {len(str(sub))} chars>"
+                if key in {"file_data", "data", "url", "image_url", "result"} and isinstance(sub, str) and len(sub) > limit:
+                    node[key] = sub[:50] + f"...<truncated, total {len(sub)} chars>"
                 else:
                     walk(sub)
         elif isinstance(node, list):
@@ -371,8 +371,213 @@ def generate_tts_content(client, *, model, prompt, voice=None, config=None):
     return _json_body_request(url, body, headers, "POST")
 
 
+def _responses_input_part(part):
+    if isinstance(part, str):
+        return {"type": "input_text", "text": part}
+
+    if not isinstance(part, dict):
+        return {"type": "input_text", "text": str(part)}
+
+    part_type = part.get("type")
+    if part_type == "text":
+        return {"type": "input_text", "text": part.get("text", "")}
+
+    if part_type == "image_url":
+        image_url = part.get("image_url")
+        if isinstance(image_url, dict):
+            image_url = image_url.get("url")
+        return {"type": "input_image", "image_url": image_url}
+
+    if part_type == "file":
+        file_payload = part.get("file") or {}
+        mime_type = str(file_payload.get("mime_type") or "")
+        file_data = file_payload.get("file_data")
+        if mime_type.startswith("image/") and file_data:
+            return {"type": "input_image", "image_url": file_data}
+        input_file = {"type": "input_file"}
+        if file_payload.get("filename"):
+            input_file["filename"] = file_payload["filename"]
+        if file_data:
+            input_file["file_data"] = file_data
+        return input_file
+
+    return part
+
+
+def _messages_to_responses_payload(messages):
+    instructions = []
+    input_items = []
+
+    for message in messages or []:
+        role = message.get("role") or "user"
+        content = message.get("content")
+
+        if role == "system":
+            if isinstance(content, list):
+                instructions.extend(
+                    str(part.get("text") or "") for part in content if isinstance(part, dict) and part.get("type") == "text"
+                )
+            elif content is not None:
+                instructions.append(str(content))
+            continue
+
+        if isinstance(content, list):
+            normalized_content = [_responses_input_part(part) for part in content]
+        elif content is None:
+            normalized_content = []
+        else:
+            normalized_content = [{"type": "input_text", "text": str(content)}]
+
+        input_items.append({"role": role, "content": normalized_content})
+
+    payload = {"input": input_items}
+    joined_instructions = "\n\n".join(part for part in instructions if part and part.strip()).strip()
+    if joined_instructions:
+        payload["instructions"] = joined_instructions
+    return payload
+
+
+def _iter_sse_events(response):
+    event_name = None
+    data_lines = []
+
+    def line_iter():
+        if hasattr(response, "readline"):
+            while True:
+                raw_line = response.readline()
+                if not raw_line:
+                    break
+                yield raw_line
+            return
+        for raw_line in response:
+            yield raw_line
+
+    for raw_line in line_iter():
+        line = raw_line.decode("utf-8", "replace").rstrip("\r\n")
+        if not line:
+            if event_name is not None or data_lines:
+                yield event_name, "\n".join(data_lines)
+            event_name = None
+            data_lines = []
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            event_name = line.split(":", 1)[1].strip()
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line.split(":", 1)[1].lstrip())
+
+    if event_name is not None or data_lines:
+        yield event_name, "\n".join(data_lines)
+
+
+def _extract_responses_text(event, *, allow_terminal_text):
+    event_type = event.get("type")
+    if event_type == "response.output_text.delta":
+        return str(event.get("delta") or "")
+    if event_type == "response.output_text.done" and allow_terminal_text:
+        text = event.get("text")
+        if text is not None:
+            return str(text)
+        item = event.get("item") or {}
+        if item.get("text") is not None:
+            return str(item.get("text"))
+        part = event.get("part") or {}
+        if part.get("text") is not None:
+            return str(part.get("text"))
+    if event_type == "response.content_part.done" and allow_terminal_text:
+        part = event.get("part") or {}
+        if part.get("type") in {"output_text", "text"} and part.get("text") is not None:
+            return str(part.get("text"))
+    return None
+
+
+def _responses_api_call(client, model, messages, *, stream_handler=None):
+    request_url = f"{_client_base_url(client)}/responses"
+    body = {
+        "model": model,
+        "stream": True,
+        **_messages_to_responses_payload(messages),
+    }
+    headers = {
+        "Authorization": f"Bearer {_client_api_key(client)}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "User-Agent": _video_user_agent(),
+    }
+    request = urllib.request.Request(
+        request_url,
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    if DEBUG:
+        debug_log(f"POST {request_url} body={_debug_json(sanitize_debug_value(body))}")
+
+    content_parts = []
+    image_parts = []
+    refusal_parts = []
+    saw_output_text_delta = False
+
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            for _, data in _iter_sse_events(response):
+                if not data:
+                    continue
+                if data == "[DONE]":
+                    break
+                event = json.loads(data)
+                event_type = event.get("type")
+
+                text = _extract_responses_text(event, allow_terminal_text=not saw_output_text_delta)
+                if event_type == "response.output_text.delta":
+                    saw_output_text_delta = True
+                if text:
+                    content_parts.append(text)
+                    if stream_handler:
+                        stream_handler(text)
+
+                if event_type == "response.output_item.done":
+                    item = event.get("item") or {}
+                    if item.get("type") == "image_generation_call" and item.get("result"):
+                        image_part = {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{item['result']}"},
+                        }
+                        if item.get("revised_prompt"):
+                            image_part["revised_prompt"] = item["revised_prompt"]
+                        image_parts.append(image_part)
+    except urllib.error.HTTPError as exc:
+        if DEBUG:
+            error_body = exc.read().decode("utf-8", "replace")
+            try:
+                debug_log(f"{exc.code} POST {request_url} error={_debug_json(json.loads(error_body))}")
+            except json.JSONDecodeError:
+                debug_log(f"{exc.code} POST {request_url} error={repr(error_body[:1000])}")
+        raise
+
+    full_content = "".join(content_parts)
+    if DEBUG:
+        debug_log(
+            "STREAM done "
+            + _debug_json(
+                {
+                    "content": full_content[:500],
+                    "images": image_parts[:1] if image_parts else None,
+                    "refusal": "".join(refusal_parts).strip() or None,
+                }
+            )
+        )
+    return _finalize_stream_response(content_parts, image_parts, refusal_parts)
+
+
 def api_call(client, model, messages, temperature=None, max_output_tokens=None, stream_handler=None, extra_body=None, config=None):
     protocol = ((config or {}).get("mode") or {}).get("protocol") or "openai-chat-completions"
+    if protocol == "openai-responses":
+        return _responses_api_call(client, model, messages, stream_handler=stream_handler)
+
     kwargs = {
         "model": model,
         "messages": messages,

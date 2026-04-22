@@ -1,5 +1,6 @@
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 from .api import api_call, create_video_task, generate_tts_content, get_video_task
 from .config import get_mode_concurrency
@@ -35,6 +36,14 @@ def _get_video_task_with_config(getter, client, task_id, config):
         return getter(client, task_id, config=config)
     except TypeError:
         return getter(client, task_id)
+
+
+def _default_image_output_path(config):
+    output_path = default_output_path("image")
+    protocol = ((config or {}).get("mode") or {}).get("protocol") or "openai-chat-completions"
+    if protocol == "openai-responses" and output_path:
+        return str(Path(output_path).with_suffix(".png"))
+    return output_path
 
 
 def run_task(
@@ -228,7 +237,7 @@ def run_task(
     )
 
     if mode == "image":
-        output_path = output or default_output_path("image")
+        output_path = output or _default_image_output_path(config)
         output_path = str(resolve_path(output_path, base_dir=base_dir)) if output else output_path
         if image_count == 1:
             saved_paths = extract_image_result(response, output_path, config=config)
@@ -269,7 +278,7 @@ def run_task(
         return {"mode": mode, "output_paths": saved_paths, "printed": False}
 
     if mode in {"chat", "text"} and response_has_images(response):
-        output_path = output or default_output_path("image")
+        output_path = output or _default_image_output_path(config)
         output_path = str(resolve_path(output_path, base_dir=base_dir)) if output else output_path
         saved_paths = extract_image_result(response, output_path, config=config)
         return {"mode": mode, "output_paths": saved_paths, "printed": False}

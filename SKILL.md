@@ -210,6 +210,8 @@ llm image "生成横版海报" --size 2K --aspect 16:9 -o banner.jpg
 - `--size` 和 `--aspect` 的实际生效情况取决于图片后端
 - `image` 当前统一通过流式请求收集结果
 - `-r/--reference` 默认按 `type=file` 发送；当配置了 `reference_transport` 且图片参考已预上传为 URL 时，会优先改用 `image_url`
+- `gpt-image-2` 这类仅支持 Responses API 的模型，需要在模型配置中声明 `protocol: openai-responses`
+- `openai-responses` 会走 `POST /v1/responses` + SSE；默认自动命名输出会改为 `.png`
 - `--provider` 与 `--model` 同时使用时，会优先在该 provider 下解析模型别名；未命中时直接按原始模型名发送
 
 ## `llm tts`
@@ -378,6 +380,9 @@ providers:
         type: chat
       gpt-image-1:
         type: image
+      gpt-image-2:
+        type: image
+        protocol: openai-responses
       gemini-3.1-flash-tts-preview:
         type: tts
         protocol: gemini-generate-content
@@ -443,6 +448,9 @@ providers:
         alias: chat-default
       gpt-image-1:
         type: image
+      gpt-image-2:
+        type: image
+        protocol: openai-responses
       gemini-3.1-flash-tts-preview:
         type: tts
         protocol: gemini-generate-content
@@ -481,7 +489,7 @@ reference_transports:
 - `modes.<mode>`：声明每个 CLI mode 默认使用哪个 provider、哪个真实模型
 - `providers.<name>`：声明上游的 `base_url`、`api_key`
 - `providers.<name>.models.<model_name>`：声明模型的 `type / alias / protocol / reference_transport / defaults`
-- `protocol` 当前支持 `openai-chat-completions`、`grok2api-image`、`gemini-generate-content`、`openai-videos` 与 `unified-video`
+- `protocol` 当前支持 `openai-chat-completions`、`openai-responses`、`grok2api-image`、`gemini-generate-content`、`openai-videos` 与 `unified-video`
 - `reference_transport` 可把本地参考文件先上传到命名的 S3 兼容存储，再将 URL 提供给上游
 - `reference_transports.<name>`：声明可复用的 S3 兼容上传目标
 - `alias` 可将 CLI 中使用的短名称映射到真实模型名

@@ -342,6 +342,7 @@ def _create_textual_app(
     max_output_tokens,
     history_messages,
     probe_input=False,
+    config=None,
 ):
     try:
         from textual.app import App, ComposeResult
@@ -505,6 +506,7 @@ def _create_textual_app(
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 stream_handler=handle_chunk,
+                config=config,
             )
             except Exception as exc:
                 state.mark_error()
@@ -660,6 +662,7 @@ def run_interactive_chat(
     max_output_tokens,
     history_messages,
     probe_input=False,
+    config=None,
 ):
     resolved_system_prompt = resolve_text(system_prompt) if system_prompt else None
     effective_history = replace_leading_system_messages(history_messages, resolved_system_prompt)
@@ -680,6 +683,7 @@ def run_interactive_chat(
         max_output_tokens=max_output_tokens,
         history_messages=effective_history,
         probe_input=probe_input,
+        config=config,
     )
     app.run()
 

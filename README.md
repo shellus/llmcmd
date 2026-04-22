@@ -221,6 +221,8 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 - `--size` 支持 `512 / 1K / 2K / 4K`
 - `--aspect` 支持 `1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9`
 - `--size` 和 `--aspect` 的实际生效情况取决于你所使用的图片后端
+- `gpt-image-2` 这类仅支持 Responses API 的模型，需要在模型配置中声明 `protocol: openai-responses`
+- `openai-responses` 会走 `POST /v1/responses` + SSE；默认自动命名输出会改为 `.png`
 - batch YAML 中的 `aspect` 建议写成带引号的字符串，例如 `"16:9"`，避免 YAML 误解析
 
 ### `llm tts`

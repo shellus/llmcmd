@@ -73,6 +73,11 @@ cli.py
 - 复用同一套流式处理与输出提取逻辑
 - 让后端兼容层承担 provider 协议转换
 
+补充边界：
+
+- `image` 模式允许按 `protocol` 切换到 `POST /v1/responses`，例如 `gpt-image-2`
+- 即使走 Responses API，调用入口仍保持在 `api.py`，不要把协议分支散落到 CLI 或消息构造层
+
 ### `agent` 是桥接能力，不是 `chat -I` 的替代实现
 
 `llm agent` 当前是对外部 `pi` coding agent 的桥接入口。
@@ -96,6 +101,7 @@ cli.py
 当前还要保持一个具体约束：
 
 - `chat` 模式下，文本类参考输入优先转为内联文本，图片类参考输入作为图片输入；不要重新引入依赖不稳定附件兼容行为的实现
+- 若某协议需要 Responses 风格 `input`，优先在 `api.py` 把现有消息结构映射过去，不要要求上层调用方改用另一套消息格式
 
 ### image 的 size/aspect 支持边界
 

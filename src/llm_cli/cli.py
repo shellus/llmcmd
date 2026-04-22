@@ -105,6 +105,7 @@ def _run_chat_once(
     temperature,
     max_output_tokens,
     session_path=None,
+    config=None,
 ):
     history_messages = load_session_messages(session_path) if session_path else []
     if history_messages and (reference or edit_path):
@@ -148,6 +149,7 @@ def _run_chat_once(
         client,
         resolved_model,
         stream_handler=_stream_to_stdout if should_stream_output else None,
+        config=config,
         **task_kwargs,
     )
     if should_stream_output and not result.get("output_paths") and result.get("text"):
@@ -210,7 +212,7 @@ def chat(prompt, reference, edit_path, session_name, system, interactive, output
         fail("chat edit 模式需要提供修改要求 prompt")
     if interactive and output:
         fail("交互式对话不支持 --output")
-    client, resolved_model, _ = _create_client_for_mode("chat", model=model, provider=provider)
+    client, resolved_model, config = _create_client_for_mode("chat", model=model, provider=provider)
     session_path = resolve_session_path(session_name, interactive=interactive) if session_name is not None else None
     if interactive:
         run_interactive_chat(
@@ -223,6 +225,7 @@ def chat(prompt, reference, edit_path, session_name, system, interactive, output
             history_messages=load_session_messages(session_path) if session_path else [],
             system_prompt=system,
             probe_input=probe_input,
+            config=config,
         )
         return
 
@@ -237,6 +240,7 @@ def chat(prompt, reference, edit_path, session_name, system, interactive, output
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         session_path=session_path,
+        config=config,
     )
     _render_text_result(result)
 

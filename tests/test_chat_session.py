@@ -161,6 +161,24 @@ class ChatSessionTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(captured["reference"], ("a.txt", "b.png"))
 
+    def test_chat_command_passes_resolved_config_to_run_task(self):
+        captured = {}
+        resolved_config = {"mode": {"protocol": "openai-responses"}}
+
+        def fake_create_client(mode, explicit_model=None, explicit_provider=None):
+            return object(), "test-model", resolved_config
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["config"] = kwargs.get("config")
+            return {"mode": mode, "text": "回答", "printed": True}
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch("llm_cli.cli.run_task", fake_run_task):
+            result = runner.invoke(cli, ["chat", "你好"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["config"], resolved_config)
+
     def test_chat_command_passes_provider_to_create_client(self):
         captured = {}
 
@@ -1026,6 +1044,25 @@ tasks:
         self.assertEqual(result.exit_code, 0)
         self.assertIsNone(captured["session_path"])
         self.assertEqual(captured["history_messages"], [])
+
+    def test_interactive_chat_passes_resolved_config_into_runner(self):
+        captured = {}
+        resolved_config = {"mode": {"protocol": "openai-responses"}}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-model", resolved_config
+
+        def fake_run_interactive_chat(**kwargs):
+            captured.update(kwargs)
+
+        runner = CliRunner()
+        with patch("llm_cli.cli.create_client", fake_create_client), patch(
+            "llm_cli.cli.run_interactive_chat", fake_run_interactive_chat
+        ):
+            result = runner.invoke(cli, ["chat", "-I"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(captured["config"], resolved_config)
 
     def test_interactive_chat_passes_system_prompt_into_runner(self):
         captured = {}
