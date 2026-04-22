@@ -6,7 +6,7 @@
 
 - 写文案、总结、翻译、提取结构化数据
 - 根据参考图生成或修改图片
-- 结合音频附件做转写、总结或字幕生成
+- 结合图片、音频、视频附件做理解、总结或字幕生成
 - 把文本直接合成为语音 wav
 - 用 YAML 一次编排多条 chat / image / tts / video 任务
 - 直接在终端里按要求编辑文本文件
@@ -62,6 +62,7 @@ llm chat "按要求改写" --edit prompt.md -o prompt.v2.md
 llm chat "详细描述这张图的所有细节" -r photo.jpg
 llm chat "总结这个附件的重点" -r report.docx
 llm chat "请转写这段录音并输出标准 SRT 字幕" -r demo.wav -o demo.srt
+llm chat "总结这个视频的关键情节并列出时间线" -r demo.mp4
 llm chat "对比两张参考图后总结共同特征" -r photo-a.jpg -r photo-b.jpg
 llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
 ```
@@ -150,7 +151,7 @@ tasks:
 
 ### `llm chat`
 用于文本生成、分析、问答、改写、持久对话，以及 `--edit` 文件编辑。
-`@文件` 用于把文本直接读进 prompt；`-r/--reference` 用于提供参考附件，其中图片按 `image_url` 发送，文本附件会先内联为文本内容块，音频附件会作为 `file` 输入发送。
+`@文件` 用于把文本直接读进 prompt；`-r/--reference` 用于提供参考附件，其中图片按 `image_url` 发送，文本附件会先内联为文本内容块，音频和视频附件会作为 `file` 输入发送。
 
 新增会话参数：
 
@@ -184,7 +185,7 @@ llm chat -I -s ./sessions/product-review.jsonl
 - `chat` 与 `image` 当前通过流式请求收集结果
 - 非交互 `chat` 会实时把流式文本写到 stdout
 - 若 `chat` 使用图片模型并返回图片，会自动落盘并显示图片路径
-- 音频理解已并入 `chat -r`；`audio` 子命令已删除
+- 音频理解与视频理解附件统一通过 `chat -r` 传入；`audio` 子命令已删除
 
 ### `llm agent`
 用于启动外部 `pi` coding agent，但复用当前 `llmcmd` 的 `chat` 模型、`BASE_URL` 与 `API_KEY` 配置。

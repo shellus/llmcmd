@@ -35,7 +35,7 @@ llm
 
 | 模式 | 用途 | 常用输入 | 常用输出 |
 |------|------|----------|----------|
-| `llm chat` | 文本生成、分析、问答、改写、编辑文件、持久对话、音频理解 | prompt、`@文件`、`-r` 附件、会话文件 | stdout、文本文件、会话文件 |
+| `llm chat` | 文本生成、分析、问答、改写、编辑文件、持久对话、音频理解、视频理解 | prompt、`@文件`、`-r` 附件、会话文件 | stdout、文本文件、会话文件 |
 | `llm agent` | 启动 `pi` coding agent，并复用当前 `chat` 配置 | prompt、`--thinking`、`--session`、`--tools` | `pi` 交互会话 |
 | `llm image` | 图片生成、参考图编辑 | prompt、`@文件`、`-r` 附件 | 图片文件 |
 | `llm tts` | 文本转语音 | prompt、`@文件`、`--voice` | wav 文件 |
@@ -71,19 +71,20 @@ llm tts @script.txt -o speech.wav
 llm chat "总结这个附件的重点" -r report.pdf
 llm chat "对比两张参考图后总结共同特征" -r photo-a.jpg -r photo-b.jpg
 llm chat "请转写这段录音" -r meeting.mp3
+llm chat "总结这个视频的关键情节" -r demo.mp4
 llm image "融合两张参考图的风格生成图片" -r person.jpg -r style.jpg -o result.jpg
 llm video "生成产品展示短片" -r first-frame.jpg --seconds 8 -o demo.mp4
 ```
 
 补充规则：
 
-- `chat` 中，图片参考会作为图片输入，文本类附件优先内联为文本，音频附件按 `file` 发送
+- `chat` 中，图片参考会作为图片输入，文本类附件优先内联为文本，音频与视频附件按 `file` 发送
 - `image` 中，参考输入按文件附件处理
 - `video` 当前仅使用第一张参考图作为首帧参考
 
 ## `llm chat`
 
-用于文本生成、分析、问答、改写、结构化提取、文件编辑、持久化对话，以及音频理解。
+用于文本生成、分析、问答、改写、结构化提取、文件编辑、持久化对话，以及音频理解、视频理解。
 
 ### 基本示例
 
@@ -92,6 +93,7 @@ llm chat "写一段产品介绍"
 llm chat @prompt.txt -o result.md
 llm chat "总结重点" -r article.md -r notes.pdf
 llm chat "请转写这段录音并输出标准 SRT 字幕" -r demo.wav -o demo.srt
+llm chat "总结这个视频的关键情节并列出时间线" -r demo.mp4
 llm chat "根据参考图修正人物外貌描述" --edit prompt.md -r ref.jpg
 ```
 
@@ -130,7 +132,7 @@ llm chat -I -s ./sessions/product-review.jsonl
 - `-I` 模式下只有配合 `-s` 才会回放历史并持续写回；不带 `-s` 时为纯内存会话
 - 当前持久会话聚焦连续文本对话，不与 `-r/--edit` 组合
 - `chat -s ... --system ...` 与 `chat -I -s ... --system ...` 会把 system prompt 写入会话历史；再次带 `--system` 启动同一会话时，只覆盖会话开头连续的 system 消息
-- `audio` 子命令已删除；音频理解统一使用 `llm chat -r`
+- `audio` 子命令已删除；音频理解与视频理解附件统一使用 `llm chat -r`
 
 交互式内置命令：
 
