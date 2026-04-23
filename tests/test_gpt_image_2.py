@@ -112,9 +112,23 @@ class GptImage2ProtocolTests(unittest.TestCase):
 
         captured = {}
 
+        sse_lines = [
+            line.encode("utf-8")
+            for line in [
+                'event: response.completed\n',
+                'data: {"type":"response.completed"}\n',
+                '\n',
+                'data: [DONE]\n',
+                '\n',
+            ]
+        ]
+
         class FakeResponse:
             status = 200
             headers = {"Content-Type": "text/event-stream"}
+
+            def __init__(self, lines):
+                self._lines = iter(lines)
 
             def __enter__(self):
                 return self
@@ -123,11 +137,11 @@ class GptImage2ProtocolTests(unittest.TestCase):
                 return False
 
             def readline(self):
-                return b""
+                return next(self._lines, b"")
 
         def fake_urlopen(request, timeout=300):
             captured["body"] = json.loads(request.data.decode("utf-8"))
-            return FakeResponse()
+            return FakeResponse(sse_lines)
 
         client = SimpleNamespace(base_url="https://example.com/v1", api_key="sk-test")
         messages = [
@@ -203,3 +217,126 @@ class GptImage2ProtocolTests(unittest.TestCase):
 
         self.assertEqual(result["mode"], "image")
         self.assertEqual(result["output_paths"], [str(default_path.with_suffix(".png"))])
+
+    def test_api_call_raises_contextual_error_for_truncated_responses_event(self):
+        from llm_cli.api import api_call
+
+        sse_lines = [
+            line.encode("utf-8")
+            for line in [
+                'event: response.output_item.done\n',
+                'data: {"type":"response.output_item.done","item":{"type":"image_generation_call","result":"AAAA"\n',
+                '\n',
+            ]
+        ]
+
+        class FakeResponse:
+            status = 200
+            headers = {"Content-Type": "text/event-stream"}
+
+            def __init__(self, lines):
+                self._lines = iter(lines)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def readline(self):
+                return next(self._lines, b"")
+
+        client = SimpleNamespace(base_url="https://example.com/v1", api_key="sk-test")
+        messages = [{"role": "user", "content": "画一只猫"}]
+
+        with patch("llm_cli.api.urllib.request.urlopen", lambda request, timeout=300: FakeResponse(sse_lines)):
+            with self.assertRaisesRegex(ValueError, r"Responses SSE 事件解析失败.*response\.output_item\.done"):
+                api_call(client, "gpt-image-2", messages, config={"mode": {"protocol": "openai-responses"}})
+
+    def test_api_call_raises_contextual_error_when_stream_ends_before_completed(self):
+        from llm_cli.api import api_call
+
+        sse_lines = [
+            line.encode("utf-8")
+            for line in [
+                'event: response.output_text.done\n',
+                'data: {"type":"response.output_text.done","text":"已开始生成"}\n',
+                '\n',
+            ]
+        ]
+
+        class FakeResponse:
+            status = 200
+            headers = {"Content-Type": "text/event-stream"}
+
+            def __init__(self, lines):
+                self._lines = iter(lines)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def readline(self):
+                return next(self._lines, b"")
+
+        client = SimpleNamespace(base_url="https://example.com/v1", api_key="sk-test")
+        messages = [{"role": "user", "content": "画一只猫"}]
+
+        with patch("llm_cli.api.urllib.request.urlopen", lambda request, timeout=300: FakeResponse(sse_lines)):
+            with self.assertRaisesRegex(ValueError, r"Responses 流提前结束.*response\.output_text\.done"):
+                api_call(client, "gpt-image-2", messages, config={"mode": {"protocol": "openai-responses"}})
+
+    def test_api_call_surfaces_responses_failed_event_message(self):
+        from llm_cli.api import api_call
+
+        sse_lines = [
+            line.encode("utf-8")
+            for line in [
+                'event: response.failed\n',
+                'data: {"type":"response.failed","response":{"error":{"type":"server_error","message":"upstream exploded"}}}\n',
+                '\n',
+            ]
+        ]
+
+        class FakeResponse:
+            status = 200
+            headers = {"Content-Type": "text/event-stream"}
+
+            def __init__(self, lines):
+                self._lines = iter(lines)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def readline(self):
+                return next(self._lines, b"")
+
+        client = SimpleNamespace(base_url="https://example.com/v1", api_key="sk-test")
+        messages = [{"role": "user", "content": "画一只猫"}]
+
+        with patch("llm_cli.api.urllib.request.urlopen", lambda request, timeout=300: FakeResponse(sse_lines)):
+            with self.assertRaisesRegex(ValueError, r"Responses 上游失败.*upstream exploded"):
+                api_call(client, "gpt-image-2", messages, config={"mode": {"protocol": "openai-responses"}})
+
+    def test_extract_image_result_reports_completed_response_without_image(self):
+        from llm_cli.output import extract_image_result
+
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="模型返回了文本说明，但没有任何图片结果",
+                        images=None,
+                        refusal=None,
+                    )
+                )
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, r"响应已完成但未返回图片.*模型返回了文本说明"):
+            extract_image_result(response, "/tmp/demo.png", config={"mode": {"protocol": "openai-responses"}})

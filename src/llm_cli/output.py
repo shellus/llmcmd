@@ -122,6 +122,17 @@ def extract_image_result(response, output_path, image_index=0, config=None):
             saved_paths.append(dest)
         return [str(path) for path in saved_paths]
 
+    if protocol == "openai-responses":
+        details = []
+        refusal = getattr(message, "refusal", None)
+        if refusal:
+            details.append(f"refusal={str(refusal).strip()[:200]}")
+        text_preview = str(content or "").strip()
+        if text_preview:
+            details.append(f"text={text_preview[:200]}")
+        detail_text = f"；{'；'.join(details)}" if details else ""
+        raise ValueError(f"响应已完成但未返回图片{detail_text}")
+
     raise ValueError("未在响应中提取到图片")
 
 

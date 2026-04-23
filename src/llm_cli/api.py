@@ -50,6 +50,37 @@ def _finalize_stream_response(content_parts, image_parts, refusal_parts):
     return SimpleNamespace(choices=[choice])
 
 
+def _truncate_text(value, limit=240):
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"...<truncated, total {len(text)} chars>"
+
+
+def _responses_event_preview(data, limit=240):
+    return _truncate_text(" ".join(str(data or "").split()), limit=limit)
+
+
+def _responses_event_error_summary(event):
+    candidates = [
+        event.get("error"),
+        (event.get("response") or {}).get("error"),
+        (event.get("item") or {}).get("error"),
+    ]
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        error_type = str(candidate.get("type") or "").strip()
+        message = str(candidate.get("message") or candidate.get("code") or "").strip()
+        if error_type and message:
+            return f"{error_type}: {message}"
+        if message:
+            return message
+        if error_type:
+            return error_type
+    return ""
+
+
 def sanitize_debug_value(value, *, limit=100):
     cloned = copy.deepcopy(value)
 
@@ -520,16 +551,38 @@ def _responses_api_call(client, model, messages, *, stream_handler=None):
     image_parts = []
     refusal_parts = []
     saw_output_text_delta = False
+    saw_done = False
+    saw_completed = False
+    event_count = 0
+    last_event_type = None
+    last_event_preview = None
 
     try:
         with urllib.request.urlopen(request, timeout=300) as response:
-            for _, data in _iter_sse_events(response):
+            content_type = response.headers.get("Content-Type", "")
+            for event_name, data in _iter_sse_events(response):
                 if not data:
                     continue
                 if data == "[DONE]":
+                    saw_done = True
+                    last_event_type = "[DONE]"
+                    last_event_preview = "[DONE]"
                     break
-                event = json.loads(data)
-                event_type = event.get("type")
+                event_count += 1
+                last_event_type = event_name or last_event_type or "unknown"
+                last_event_preview = _responses_event_preview(data)
+                try:
+                    event = json.loads(data)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"Responses SSE 事件解析失败：{exc}；last_event={last_event_type or 'unknown'}；data预览={last_event_preview or '<empty>'}"
+                    ) from exc
+                event_type = event.get("type") or event_name or "unknown"
+                last_event_type = event_type
+
+                if event_type in {"response.failed", "response.error"}:
+                    error_summary = _responses_event_error_summary(event) or last_event_preview or event_type
+                    raise ValueError(f"Responses 上游失败：{error_summary}")
 
                 text = _extract_responses_text(event, allow_terminal_text=not saw_output_text_delta)
                 if event_type == "response.output_text.delta":
@@ -538,6 +591,9 @@ def _responses_api_call(client, model, messages, *, stream_handler=None):
                     content_parts.append(text)
                     if stream_handler:
                         stream_handler(text)
+
+                if event_type == "response.completed":
+                    saw_completed = True
 
                 if event_type == "response.output_item.done":
                     item = event.get("item") or {}
@@ -558,12 +614,21 @@ def _responses_api_call(client, model, messages, *, stream_handler=None):
                 debug_log(f"{exc.code} POST {request_url} error={repr(error_body[:1000])}")
         raise
 
+    if not saw_completed and not image_parts:
+        end_reason = "[DONE]" if saw_done else "EOF"
+        raise ValueError(
+            f"Responses 流提前结束：连接以 {end_reason} 结束，未收到 response.completed；last_event={last_event_type or 'unknown'}；events={event_count}"
+        )
+
     full_content = "".join(content_parts)
     if DEBUG:
         debug_log(
             "STREAM done "
             + _debug_json(
                 {
+                    "content_type": content_type,
+                    "events": event_count,
+                    "last_event": last_event_type,
                     "content": full_content[:500],
                     "images": image_parts[:1] if image_parts else None,
                     "refusal": "".join(refusal_parts).strip() or None,
