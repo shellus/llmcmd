@@ -89,33 +89,33 @@ def get_batch_concurrency(modes, configs, yaml_data):
     return value
 
 
-def resolve_task_output(mode, task, output_dir, yaml_dir, index):
+def resolve_task_output(mode, task, output_dir, base_dir, index):
     output = task.get("output")
     if output:
         output_path = Path(output)
         if output_dir and not output_path.is_absolute():
             output_path = Path(output_dir) / output_path
         elif not output_path.is_absolute():
-            output_path = yaml_dir / output_path
+            output_path = Path(base_dir) / output_path
         return str(output_path.resolve())
 
     edit_path = task.get("edit")
     if edit_path:
         edit_target = Path(edit_path)
         if not edit_target.is_absolute():
-            edit_target = yaml_dir / edit_target
+            edit_target = Path(base_dir) / edit_target
         return str(edit_target.resolve())
 
     if mode == "image":
-        base_dir = Path(output_dir).resolve() if output_dir else (yaml_dir / "gemini-output").resolve()
-        return str(base_dir / f"image-{index}.jpg")
+        target_dir = Path(output_dir).resolve() if output_dir else (Path(base_dir) / "gemini-output").resolve()
+        return str(target_dir / f"image-{index}.jpg")
 
     if mode == "video":
-        base_dir = Path(output_dir).resolve() if output_dir else (yaml_dir / "gemini-output").resolve()
-        return str(base_dir / f"video-{index}.mp4")
+        target_dir = Path(output_dir).resolve() if output_dir else (Path(base_dir) / "gemini-output").resolve()
+        return str(target_dir / f"video-{index}.mp4")
     if mode == "tts":
-        base_dir = Path(output_dir).resolve() if output_dir else (yaml_dir / "gemini-output").resolve()
-        return str(base_dir / f"tts-{index}.wav")
+        target_dir = Path(output_dir).resolve() if output_dir else (Path(base_dir) / "gemini-output").resolve()
+        return str(target_dir / f"tts-{index}.wav")
 
     return None
 
@@ -144,7 +144,7 @@ def run_batch(yaml_path_str: str, explicit_provider=None):
     if not isinstance(data, dict):
         fail("YAML 顶层必须是对象")
 
-    yaml_dir = yaml_path.parent
+    batch_base_dir = Path.cwd().resolve()
     if "mode" not in data:
         fail("batch YAML 顶层缺少必填字段 mode")
     default_mode = normalize_mode(data.get("mode"), field_name="顶层 mode")
@@ -154,7 +154,7 @@ def run_batch(yaml_path_str: str, explicit_provider=None):
 
     output_dir = data.get("output_dir")
     if output_dir:
-        output_dir = str(resolve_path(output_dir, base_dir=yaml_dir))
+        output_dir = str(resolve_path(output_dir, base_dir=batch_base_dir))
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     global_system_prompt = data.get("system_prompt")
@@ -197,7 +197,7 @@ def run_batch(yaml_path_str: str, explicit_provider=None):
             "config": None,
         }
         validate_task_fields(mode, task_spec, index)
-        task_spec["output"] = resolve_task_output(mode, task, output_dir, yaml_dir, index)
+        task_spec["output"] = resolve_task_output(mode, task, output_dir, batch_base_dir, index)
         prepared.append(task_spec)
         modes.add(mode)
 
@@ -253,7 +253,7 @@ def run_batch(yaml_path_str: str, explicit_provider=None):
             output=task_spec["output"],
             temperature=task_spec["temperature"],
             max_output_tokens=task_spec["max_output_tokens"],
-            base_dir=yaml_dir,
+            base_dir=batch_base_dir,
             edit_path=task_spec["edit_path"],
             voice=task_spec.get("voice"),
             image_count=task_spec["count"],

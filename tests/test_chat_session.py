@@ -844,6 +844,7 @@ tasks:
 
         def fake_run_task(mode, client, model, **kwargs):
             captured["prompt"] = kwargs["prompt"]
+            captured["base_dir"] = kwargs["base_dir"]
             return {"mode": mode, "text": "ok", "printed": True}
 
         yaml_content = """\
@@ -857,16 +858,26 @@ tasks:
 
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            yaml_path = tmp_path / "tasks.yaml"
+            workdir = tmp_path / "workdir"
+            config_dir = tmp_path / "configs"
+            workdir.mkdir()
+            config_dir.mkdir()
+            yaml_path = config_dir / "tasks.yaml"
             yaml_path.write_text(yaml_content, encoding="utf-8")
-            (tmp_path / "instruction.md").write_text("顶层提示词", encoding="utf-8")
-            (tmp_path / "ref.md").write_text("参考文件", encoding="utf-8")
-            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
-                run_batch(str(yaml_path))
+            (workdir / "instruction.md").write_text("顶层提示词", encoding="utf-8")
+            (workdir / "ref.md").write_text("参考文件", encoding="utf-8")
+            old_cwd = Path.cwd()
+            os.chdir(workdir)
+            try:
+                with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                    run_batch(str(yaml_path))
+            finally:
+                os.chdir(old_cwd)
 
         self.assertEqual(captured["prompt"], "@instruction.md")
+        self.assertEqual(Path(captured["base_dir"]), workdir.resolve())
 
-    def test_batch_image_task_uses_mode_and_index_for_default_output_name(self):
+    def test_batch_image_task_uses_current_working_directory_for_default_output_name(self):
         from llm_cli.batch import run_batch
 
         captured = {}
@@ -876,6 +887,7 @@ tasks:
 
         def fake_run_task(mode, client, model, **kwargs):
             captured["output"] = kwargs["output"]
+            captured["base_dir"] = kwargs["base_dir"]
             return {"mode": mode, "output_paths": [kwargs["output"]], "printed": False}
 
         yaml_content = """\
@@ -885,12 +897,23 @@ tasks:
 """
 
         with TemporaryDirectory() as tmp:
-            yaml_path = Path(tmp) / "tasks.yaml"
+            tmp_path = Path(tmp)
+            workdir = tmp_path / "workdir"
+            config_dir = tmp_path / "configs"
+            workdir.mkdir()
+            config_dir.mkdir()
+            yaml_path = config_dir / "tasks.yaml"
             yaml_path.write_text(yaml_content, encoding="utf-8")
-            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
-                run_batch(str(yaml_path))
+            old_cwd = Path.cwd()
+            os.chdir(workdir)
+            try:
+                with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                    run_batch(str(yaml_path))
+            finally:
+                os.chdir(old_cwd)
 
-        self.assertEqual(captured["output"], str((Path(tmp) / "gemini-output" / "image-1.jpg").resolve()))
+        self.assertEqual(Path(captured["base_dir"]), workdir.resolve())
+        self.assertEqual(captured["output"], str((workdir / "gemini-output" / "image-1.jpg").resolve()))
 
     def test_batch_default_output_name_ignores_yaml_id_field(self):
         from llm_cli.batch import run_batch
@@ -912,12 +935,62 @@ tasks:
 """
 
         with TemporaryDirectory() as tmp:
-            yaml_path = Path(tmp) / "tasks.yaml"
+            tmp_path = Path(tmp)
+            workdir = tmp_path / "workdir"
+            config_dir = tmp_path / "configs"
+            workdir.mkdir()
+            config_dir.mkdir()
+            yaml_path = config_dir / "tasks.yaml"
             yaml_path.write_text(yaml_content, encoding="utf-8")
-            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
-                run_batch(str(yaml_path))
+            old_cwd = Path.cwd()
+            os.chdir(workdir)
+            try:
+                with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                    run_batch(str(yaml_path))
+            finally:
+                os.chdir(old_cwd)
 
-        self.assertEqual(captured["output"], str((Path(tmp) / "gemini-output" / "video-1.mp4").resolve()))
+        self.assertEqual(captured["output"], str((workdir / "gemini-output" / "video-1.mp4").resolve()))
+
+    def test_batch_relative_output_dir_and_output_are_resolved_from_current_working_directory(self):
+        from llm_cli.batch import run_batch
+
+        captured = {}
+
+        def fake_create_client(mode, explicit_model=None):
+            return object(), "test-chat-model", {"BASE_URL": "https://example.com/v1"}
+
+        def fake_run_task(mode, client, model, **kwargs):
+            captured["output"] = kwargs["output"]
+            return {"mode": mode, "text": "ok", "printed": True}
+
+        yaml_content = """\
+mode: chat
+output_dir: outputs
+tasks:
+  - prompt: "总结下面内容"
+    input: article.md
+    output: summary.md
+"""
+
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            workdir = tmp_path / "workdir"
+            config_dir = tmp_path / "configs"
+            workdir.mkdir()
+            config_dir.mkdir()
+            yaml_path = config_dir / "tasks.yaml"
+            yaml_path.write_text(yaml_content, encoding="utf-8")
+            (workdir / "article.md").write_text("内容", encoding="utf-8")
+            old_cwd = Path.cwd()
+            os.chdir(workdir)
+            try:
+                with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                    run_batch(str(yaml_path))
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(captured["output"], str((workdir / "outputs" / "summary.md").resolve()))
 
     def test_single_chat_with_session_loads_history_and_appends(self):
         with TemporaryDirectory() as tmp:
@@ -2877,13 +2950,23 @@ tasks:
 """
 
         with TemporaryDirectory() as tmp:
-            yaml_path = Path(tmp) / "tasks.yaml"
+            tmp_path = Path(tmp)
+            workdir = tmp_path / "workdir"
+            config_dir = tmp_path / "configs"
+            workdir.mkdir()
+            config_dir.mkdir()
+            yaml_path = config_dir / "tasks.yaml"
             yaml_path.write_text(yaml_content, encoding="utf-8")
-            with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
-                run_batch(str(yaml_path))
+            old_cwd = Path.cwd()
+            os.chdir(workdir)
+            try:
+                with patch("llm_cli.batch.create_client", fake_create_client), patch("llm_cli.batch.run_task", fake_run_task):
+                    run_batch(str(yaml_path))
+            finally:
+                os.chdir(old_cwd)
 
         self.assertEqual(captured["voice"], "Kore")
-        self.assertEqual(captured["output"], str((Path(tmp) / "gemini-output" / "tts-1.wav").resolve()))
+        self.assertEqual(captured["output"], str((workdir / "gemini-output" / "tts-1.wav").resolve()))
 
     def test_batch_video_task_passes_seconds_and_size_to_run_task(self):
         from llm_cli.batch import run_batch

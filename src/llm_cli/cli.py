@@ -451,6 +451,7 @@ def batch(yaml_path, provider):
 
     读取批处理配置并并发执行多个任务。
     YAML 中支持 mode: chat / image / tts / video，chat 模式支持 reference 图片输入。
+    YAML 内的相对路径按当前工作目录解析，而不是按 YAML 文件所在目录解析。
     """
     _run_safely(run_batch, yaml_path, explicit_provider=provider)
 

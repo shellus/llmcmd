@@ -1,0 +1,77 @@
+# shellus-llmcmd batch 完整模板
+#
+# 用法：
+#   llm batch examples/batch/full-template.yaml
+#
+# 说明：
+# - 顶层 relative path 相对于当前工作目录解析，而不是 YAML 文件所在目录
+# - 顶层 concurrency 控制 task 级并发，不控制单个 image task 的多图并发
+# - 单个 image task 的 count>1 时，图片内部并发由 ~/.llm/config.yaml 中的 image 并发配置控制
+# - output 为相对路径时，会优先写入 output_dir
+# - aspect 建议始终使用引号，例如 "16:9"
+
+mode: chat
+concurrency: 4
+output_dir: outputs
+system_prompt: "你是严谨的处理助手"
+temperature: 0.2
+max_output_tokens: 4000
+
+# 可选：为所有 task 提供共享默认值；单个 task 可覆盖这些字段
+# model: gpt-4.1
+# prompt: "请根据输入完成任务"
+# input:
+#   - common/context.md
+# reference:
+#   - refs/style.jpg
+# edit: drafts/source.md
+# voice: Kore
+
+tasks:
+  - prompt: "总结下面内容，输出为带标题和要点的 Markdown"
+    input:
+      - inputs/article.md
+      - inputs/notes.txt
+    output: summary.md
+
+  - prompt: "按要求改写这份提示词，保留原结构，不要新增无关设定"
+    edit: prompts/character.md
+    output: prompts/character.v2.md
+
+  - prompt: "根据参考图修正文案里的外貌描述，只改需要修正的部分"
+    reference:
+      - refs/person.jpg
+      - refs/style.jpg
+    input: prompts/profile.md
+    output: profile-fix.md
+
+  - mode: image
+    prompt: "为产品主页生成三张极简横幅图"
+    reference:
+      - refs/product.jpg
+      - refs/style-board.jpg
+    count: 3
+    size: 2K
+    aspect: "16:9"
+    output: hero.jpg
+    # model: gpt-image-1
+
+  - mode: tts
+    prompt: "请用温和、清晰的语气朗读这段欢迎词"
+    voice: Kore
+    output: welcome.wav
+    # model: gemini-3.1-flash-tts-preview
+
+  - mode: video
+    prompt: "生成一段产品宣传短片，节奏轻快，适合首页首屏"
+    reference:
+      - refs/cover.jpg
+    seconds: "8"
+    size: 720x1280
+    output: promo.mp4
+    # model: sora_t2v_turbo
+
+  # 仅恢复既有视频任务时使用；与 prompt 二选一即可
+  # - mode: video
+  #   resume_task_id: vid_123
+  #   output: promo-resumed.mp4

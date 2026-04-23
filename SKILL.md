@@ -276,7 +276,7 @@ llm batch tasks.yaml
 
 ```yaml
 mode: chat
-system_prompt: "你是严谨的处理助手"
+concurrency: 4
 output_dir: outputs
 
 tasks:
@@ -284,34 +284,20 @@ tasks:
     input: article.md
     output: summary.md
 
-  - prompt: "把人物脸型改成偏瘦，不要改动其他描述"
-    edit: 商务女性生图.md
-    output: 商务女性生图.v2.md
-
   - mode: image
     prompt: "为产品主页生成三张极简横幅图"
     count: 3
-    size: 2K
     aspect: "16:9"
     output: hero.jpg
-
-  - mode: tts
-    prompt: "请朗读这段欢迎词"
-    voice: Kore
-    output: welcome.wav
-
-  - mode: video
-    prompt: "生成一段产品宣传短片"
-    reference:
-      - cover.jpg
-    seconds: "8"
-    size: 720x1280
-    output: promo.mp4
 ```
+
+完整可复制模板见：[`examples/batch/full-template.yaml`](./examples/batch/full-template.yaml)
 
 说明：
 
+- batch YAML 内的相对路径按当前工作目录解析，而不是按 YAML 文件所在目录解析
 - 顶层 `mode` 可为任务提供默认模式
+- 顶层 `concurrency` 控制 batch 内 task 级并发
 - 单个任务可通过 `mode` 覆盖默认值
 - 如果定义了 `output`，始终以 `output` 为准
 - 图片、语音、视频任务未定义 `output` 时，会按任务序号自动命名为 `image-1.jpg`、`tts-2.wav`、`video-3.mp4`
