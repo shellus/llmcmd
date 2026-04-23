@@ -56,7 +56,6 @@ def run_task(
     system_prompt=None,
     input_paths=None,
     reference=None,
-    audio_file=None,
     voice=None,
     output=None,
     temperature=None,
@@ -110,10 +109,6 @@ def run_task(
         configured_edit_model = ((config or {}).get("model_config") or {}).get("edit_model")
         if configured_edit_model:
             request_model = configured_edit_model
-    audio_path = None
-    if audio_file:
-        audio_path = str(resolve_path(audio_file, base_dir=base_dir))
-
     if messages is None and mode not in {"video", "tts"}:
         messages = build_messages(
             effective_mode,
@@ -121,7 +116,6 @@ def run_task(
             system_prompt=system_text,
             input_text=input_text,
             reference_path=reference_path,
-            audio_path=audio_path,
             protocol=((config or {}).get("mode") or {}).get("protocol"),
             reference_urls=reference_urls,
         )

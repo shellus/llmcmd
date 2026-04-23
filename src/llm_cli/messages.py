@@ -67,7 +67,6 @@ def build_messages(
     system_prompt=None,
     input_text=None,
     reference_path=None,
-    audio_path=None,
     protocol=None,
     reference_urls=None,
 ):

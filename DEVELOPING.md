@@ -15,7 +15,7 @@
 
 它的核心目标是：
 
-- 用一条 `llm` 命令统一承载 `chat / image / audio / video / batch`
+- 用一条 `llm` 命令统一承载 `chat / image / tts / video / batch`
 - 保持终端友好，方便脚本、自动化和 AI Agent 调用
 - 通过 OpenAI 兼容接口接入不同上游，而不是在 CLI 内绑定某一家厂商 SDK
 
@@ -64,7 +64,7 @@ cli.py
 
 ### 统一走 OpenAI 兼容入口
 
-项目当前刻意保持 `chat / image / audio` 共用 OpenAI 兼容入口，不在 CLI 内为 Gemini、Claude、OpenAI 等分别维护多套 SDK 调用路径。
+项目当前刻意保持 `chat / image` 以及基于 `chat -r` 的音频/视频理解共用 OpenAI 兼容入口，不在 CLI 内为 Gemini、Claude、OpenAI 等分别维护多套 SDK 调用路径。
 
 这样做的原因：
 
