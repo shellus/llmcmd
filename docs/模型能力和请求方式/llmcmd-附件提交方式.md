@@ -143,22 +143,20 @@
 
 ## `llm image`
 
-### 默认路径：`file` 内容块
+### 默认路径：`image_url` 内容块
 
-`image` 模式默认把参考附件提交为 `file` 内容块：
+`image` 模式在默认 `openai-chat-completions` 协议下，把本地图片参考提交为 `image_url` 内容块，URL 使用 data URL：
 
 ```json
 {
-  "type": "file",
-  "file": {
-    "filename": "ref.jpg",
-    "mime_type": "image/jpeg",
-    "file_data": "data:image/jpeg;base64,..."
+  "type": "image_url",
+  "image_url": {
+    "url": "data:image/jpeg;base64,..."
   }
 }
 ```
 
-代码：`src/llm_cli/messages.py:127-144`
+代码：`src/llm_cli/messages.py`
 
 ### 远程 URL 路径：`reference_transport`
 
@@ -177,9 +175,9 @@
 
 ### `grok2api-image` 兼容路径
 
-当协议为 `grok2api-image` 且参考文件是图片时，会改为 `image_url + data URL`：
+当协议为 `grok2api-image` 且参考文件是图片时，同样使用 `image_url + data URL`：
 
-代码：`src/llm_cli/messages.py:136-139`
+代码：`src/llm_cli/messages.py`
 
 ### 视频附件边界
 

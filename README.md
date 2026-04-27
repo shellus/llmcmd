@@ -198,7 +198,7 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 - `agent` 当前使用 `chat` 模式配置作为上游来源；如需切换网关或 key，仍通过 `~/.llm/.env`、`~/.llm/config.yaml` 或运行时环境变量覆盖
 
 ### `llm image`
-用于图片生成或参考图编辑，支持 `-n/--count` 多图生成。`-r/--reference` 用于提供参考附件；默认按 `type=file` 发送，但当配置了 `reference_transport` 且参考图已预上传为 URL 时，会优先按 `image_url` 发送图片引用。
+用于图片生成或参考图编辑，支持 `-n/--count` 多图生成。`-r/--reference` 用于提供参考附件；默认 `openai-chat-completions` 协议下，本地图片参考按 `image_url` data URL 发送；当配置了 `reference_transport` 且参考图已预上传为 URL 时，会优先按远程 `image_url` 发送图片引用。
 
 补充说明：
 

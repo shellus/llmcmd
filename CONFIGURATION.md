@@ -217,7 +217,7 @@ llm chat "你好，输出一句测试文本"
 
 说明：
 
-- `openai-chat-completions`：通过 `POST /v1/chat/completions` 承载 `chat / image`
+- `openai-chat-completions`：通过 `POST /v1/chat/completions` 承载 `chat / image`；图片参考按 `image_url` data URL 发送
 - `openai-responses`：图片模式走 `POST /v1/responses`，固定 `stream=true` 并按 SSE 提取 `response.output_item.done.item.result`
 - `grok2api-image`：图片模式专用变体，仍走 `POST /v1/chat/completions`，但参考图按 `image_url` 发送，结果优先从 `message.content` 提取图片 URL
 - `gemini-generate-content`：通过 Gemini 原生 `POST /v1beta/models/{model}:generateContent` 承载 `tts`

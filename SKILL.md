@@ -209,7 +209,7 @@ llm image "生成横版海报" --size 2K --aspect 16:9 -o banner.jpg
 
 - `--size` 和 `--aspect` 的实际生效情况取决于图片后端
 - `image` 当前统一通过流式请求收集结果
-- `-r/--reference` 默认按 `type=file` 发送；当配置了 `reference_transport` 且图片参考已预上传为 URL 时，会优先改用 `image_url`
+- `-r/--reference` 在默认 `openai-chat-completions` 协议下，本地图片参考按 `image_url` data URL 发送；当配置了 `reference_transport` 且图片参考已预上传为 URL 时，会优先改用远程 `image_url`
 - `gpt-image-2` 这类仅支持 Responses API 的模型，需要在模型配置中声明 `protocol: openai-responses`
 - `openai-responses` 会走 `POST /v1/responses` + SSE；默认自动命名输出会改为 `.png`
 - `--provider` 与 `--model` 同时使用时，会优先在该 provider 下解析模型别名；未命中时直接按原始模型名发送

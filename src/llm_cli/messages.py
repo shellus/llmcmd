@@ -77,6 +77,7 @@ def build_messages(
     else:
         reference_paths = [reference_path]
     reference_urls = list(reference_urls or [])
+    effective_protocol = protocol or "openai-chat-completions"
 
     messages = []
     if system_prompt:
@@ -138,7 +139,9 @@ def build_messages(
                     fail(f"image 模式暂不支持视频附件: {path}")
                 if reference_url and is_image_attachment(path):
                     content.append(_build_remote_image_url_part(reference_url))
-                elif protocol == "grok2api-image" and is_image_attachment(path):
+                elif effective_protocol in {"openai-chat-completions", "grok2api-image"} and is_image_attachment(
+                    path
+                ):
                     content.append(_build_image_url_part(path))
                 else:
                     content.append(_build_file_part(path))

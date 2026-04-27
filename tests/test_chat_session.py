@@ -396,18 +396,21 @@ class ChatSessionTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 build_messages("chat", prompt="分析附件", reference_path=["/tmp/demo.bin"])
 
-    def test_build_messages_image_uses_file_parts_for_references(self):
+    def test_build_messages_image_uses_image_url_for_openai_chat_completions_references(self):
         from llm_cli.messages import build_messages
 
         with patch("llm_cli.messages.load_binary_attachment") as mock_load:
             mock_load.return_value = {"path": "/tmp/ref.png", "mime_type": "image/png", "base64_data": "QQ=="}
-            messages = build_messages("image", prompt="保留主体重绘", reference_path=["/tmp/ref.png"])
+            messages = build_messages(
+                "image",
+                prompt="保留主体重绘",
+                reference_path=["/tmp/ref.png"],
+                protocol="openai-chat-completions",
+            )
 
         content = messages[0]["content"]
-        self.assertEqual(content[0]["type"], "file")
-        self.assertEqual(content[0]["file"]["filename"], "ref.png")
-        self.assertEqual(content[0]["file"]["mime_type"], "image/png")
-        self.assertEqual(content[0]["file"]["file_data"], "data:image/png;base64,QQ==")
+        self.assertEqual(content[0]["type"], "image_url")
+        self.assertEqual(content[0]["image_url"]["url"], "data:image/png;base64,QQ==")
         self.assertEqual(content[1], {"type": "text", "text": "保留主体重绘"})
 
     def test_build_messages_image_prefers_uploaded_reference_urls(self):
@@ -1949,11 +1952,11 @@ providers:
 
         self.assertEqual(len(messages), 1)
         content = messages[0]["content"]
-        file_parts = [part for part in content if part["type"] == "file"]
+        image_parts = [part for part in content if part["type"] == "image_url"]
         text_parts = [part for part in content if part["type"] == "text"]
-        self.assertEqual(len(file_parts), 2)
-        self.assertEqual(file_parts[0]["file"]["filename"], "first.jpg")
-        self.assertEqual(file_parts[1]["file"]["filename"], "second.jpg")
+        self.assertEqual(len(image_parts), 2)
+        self.assertTrue(image_parts[0]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
+        self.assertTrue(image_parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
         self.assertEqual(text_parts, [{"type": "text", "text": "测试提示词"}])
 
     def test_build_messages_merges_image_prompt_and_input_text(self):
