@@ -17,12 +17,23 @@
 
 ## 为什么用它
 
-- **一个命令统一入口**：`chat`、`agent`、`image`、`tts`、`batch`
+- **一个命令统一入口**：`chat`、`agent`、`image`、`tts`、`video`、`batch`
 - **终端友好**：天然适合 shell、cron、CI、脚本拼装
 - **文件编辑能力**：`chat --edit` 直接按要求改文件
 - **多图生成能力**：`image -n` 支持数量控制、并发控制和轻量进度输出
 - **批处理能力**：YAML 一次组织多条任务
 - **兼容 OpenAI 风格接口与 Gemini 原生接口**：适合自建网关、代理层、兼容服务
+
+## 文档阅读路径
+
+本项目文档按用途分工：
+
+- **README.md**：项目介绍、安装方式、命令用法、常见场景和基础注意事项
+- **CONFIGURATION.md**：配置唯一事实来源，集中说明 provider、model、protocol、alias、defaults、reference_transport 与环境变量覆盖规则
+- **SKILL.md**：面向 Agent 和终端自动化的完整调用手册，强调任务入口、命令组合和自动化注意事项
+- **DEVELOPING.md**：面向维护者的开发参考，说明代码结构、设计边界和文档维护规则
+
+涉及配置字段含义、`protocol` 可选值、模型解析优先级和排查流程时，以 [CONFIGURATION.md](./CONFIGURATION.md) 为准。
 
 ## 安装
 
@@ -206,7 +217,9 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 - `--model` 可临时覆盖当前 image 模式使用的模型；与 `--provider` 同时使用时，会优先在该 provider 下解析模型别名，未命中时直接按原始模型名发送
 - `--size` 支持 `512 / 1K / 2K / 4K`
 - `--aspect` 支持 `1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3 / 4:5 / 5:4 / 21:9`
-- `--size` 和 `--aspect` 的实际生效情况取决于你所使用的图片后端
+- `--size` 和 `--aspect` 的实际生效情况取决于图片后端
+- `llm image` 表示使用图片任务的输入、输出与落盘流程；实际能否返回图片仍取决于所选模型是否具备图片生成能力
+- 文本/多模态理解模型可能只返回文字说明；图片生成或图片编辑应选择对应 provider 下的图片模型
 - `codex/gpt-image-2` 这类仅支持 Responses API 的模型，需要在模型配置中声明 `protocol: openai-responses`
 - `openai-responses` 会走 `POST /v1/responses` + SSE；默认自动命名输出会改为 `.png`
 - batch YAML 中的 `aspect` 建议写成带引号的字符串，例如 `"16:9"`，避免 YAML 误解析
@@ -254,9 +267,19 @@ llm agent --session ./pi-session.jsonl --tools read,grep,find,ls
 ~/.llm/config.yaml
 ```
 
-配置来源、优先级、`--model` 解析规则、运行时环境变量覆盖，以及完整示例，见：
+配置来源、优先级、`--model` 解析规则、运行时环境变量覆盖、`protocol` 可选值，以及完整示例，见：
 
 - [CONFIGURATION.md](./CONFIGURATION.md)
+
+核心概念：
+
+- `mode`：CLI 任务类型，例如 `chat / image / tts / video`
+- `provider`：上游服务或网关配置，包含 `base_url` 与 `api_key`
+- `model`：发送给上游的模型名，可通过 alias 简化输入
+- `protocol`：CLI 与上游交互时使用的请求协议，不等同于模型能力
+- `reference_transport`：把本地参考文件预上传为 URL 的传输配置
+
+常见关系：`llm image` 只决定使用图片任务流程；是否返回图片由所选模型和后端能力共同决定。
 
 最常见的临时覆盖方式：
 

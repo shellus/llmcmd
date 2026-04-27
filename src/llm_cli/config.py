@@ -4,6 +4,25 @@ from pathlib import Path
 
 from .utils import fail
 
+SUPPORTED_PROTOCOLS_BY_MODE = {
+    "chat": (
+        "openai-chat-completions",
+    ),
+    "image": (
+        "openai-chat-completions",
+        "openai-responses",
+        "grok2api-image",
+    ),
+    "tts": (
+        "gemini-generate-content",
+    ),
+    "video": (
+        "openai-videos",
+        "unified-video",
+    ),
+}
+SUPPORTED_PROTOCOLS = tuple(dict.fromkeys(protocol for protocols in SUPPORTED_PROTOCOLS_BY_MODE.values() for protocol in protocols))
+
 try:
     import yaml
 except ImportError:
@@ -198,6 +217,16 @@ def _default_protocol_for_mode(mode):
     return f"openai-{mode}"
 
 
+def _validate_protocol(mode, protocol):
+    if protocol not in SUPPORTED_PROTOCOLS:
+        choices = ", ".join(SUPPORTED_PROTOCOLS)
+        fail(f"{mode} 模式 protocol 不支持: {protocol}；可选值: {choices}")
+    mode_choices = SUPPORTED_PROTOCOLS_BY_MODE.get(mode) or ()
+    if mode_choices and protocol not in mode_choices:
+        choices = ", ".join(mode_choices)
+        fail(f"{mode} 模式 protocol 不适用: {protocol}；{mode} 可选值: {choices}")
+
+
 def resolve_mode_settings(mode, config, explicit_model=None, explicit_provider=None):
     mode = _normalize_mode(mode)
     providers = config.get("providers") or {}
@@ -270,6 +299,8 @@ def resolve_mode_settings(mode, config, explicit_model=None, explicit_provider=N
         "defaults": dict((model_config or {}).get("defaults") or {}),
         "raw": global_mode,
     }
+
+    _validate_protocol(mode, mode_settings["protocol"])
 
     reference_transport_name = mode_settings["reference_transport"]
     reference_transports = config.get("reference_transports") or {}

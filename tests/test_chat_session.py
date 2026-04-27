@@ -1638,6 +1638,48 @@ providers:
 
         self.assertEqual(runtime["providers"]["openai"]["api_key"], "from-runtime")
 
+    def test_resolve_mode_settings_rejects_unknown_protocol(self):
+        from llm_cli.config import resolve_mode_settings
+
+        config = {
+            "modes": {
+                "image": {"provider": "openai", "model": "image-model"},
+            },
+            "providers": {
+                "openai": {
+                    "base_url": "https://example.com/v1",
+                    "api_key": "demo-key",
+                    "models": {
+                        "image-model": {"type": "image", "protocol": "abc"},
+                    },
+                }
+            },
+        }
+
+        with self.assertRaises(SystemExit):
+            resolve_mode_settings("image", config)
+
+    def test_resolve_mode_settings_rejects_protocol_that_does_not_apply_to_mode(self):
+        from llm_cli.config import resolve_mode_settings
+
+        config = {
+            "modes": {
+                "image": {"provider": "openai", "model": "image-model"},
+            },
+            "providers": {
+                "openai": {
+                    "base_url": "https://example.com/v1",
+                    "api_key": "demo-key",
+                    "models": {
+                        "image-model": {"type": "image", "protocol": "gemini-generate-content"},
+                    },
+                }
+            },
+        }
+
+        with self.assertRaises(SystemExit):
+            resolve_mode_settings("image", config)
+
     def test_resolve_mode_settings_prefers_runtime_env_over_yaml_defaults(self):
         from llm_cli.config import load_runtime_config, resolve_mode_settings
 

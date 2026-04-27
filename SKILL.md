@@ -305,210 +305,94 @@ tasks:
 
 ## 配置
 
-默认从以下位置读取配置：
+配置专题的唯一事实来源是 [`CONFIGURATION.md`](./CONFIGURATION.md)。Agent 处理配置相关任务时，应优先读取该文件，再执行命令或修改配置。
+
+默认配置文件：
 
 ```bash
 ~/.llm/.env
 ~/.llm/config.yaml
 ```
 
-加载顺序：
+核心概念：
 
-1. 先读取 `~/.llm/.env`，将其中变量写入进程环境；若命令启动时已经存在同名环境变量，则保留运行时环境变量
-2. 再读取 `~/.llm/config.yaml`
-3. 解析 YAML 中的 `${ENV_NAME}` 占位符
-4. 命令执行阶段统一从内存中的配置实例读取 provider、model、base_url、api_key、protocol 等字段
+| 概念 | 含义 | Agent 处理要点 |
+|------|------|----------------|
+| `mode` | CLI 任务类型 | 对应 `chat / image / tts / video / batch` 等命令入口 |
+| `provider` | 上游服务或兼容网关 | 决定 `base_url` 与 `api_key` |
+| `model` | 发给上游的模型名 | `--model` 可能同时切换 provider |
+| `protocol` | 请求协议 | 完整可选值和解释见 `CONFIGURATION.md` |
+| `reference_transport` | 参考文件预上传配置 | 视频或部分网关链路常用 |
 
-### 快速开始
-
-首次使用时，先准备依赖与配置目录：
-
-```bash
-pip install -U shellus-llmcmd openai pyyaml
-mkdir -p ~/.llm
-```
-
-然后创建 `~/.llm/.env`：
-
-```bash
-cat > ~/.llm/.env <<'EOF'
-OPENAI_API_KEY=your_openai_api_key
-REVERSE_VIDEO_KEY=your_reverse_video_key
-EOF
-```
-
-再创建 `~/.llm/config.yaml`：
-
-```yaml
-default_provider: openai
-concurrency: 4
-
-modes:
-  chat:
-    provider: openai
-    model: gpt-4.1
-  image:
-    provider: openai
-    model: gpt-image-1
-  tts:
-    provider: openai
-    model: gemini-3.1-flash-tts-preview
-  video:
-    provider: reverse-video
-    model: sora_t2v_turbo
-
-providers:
-  openai:
-    base_url: https://api.openai.com/v1
-    api_key: ${OPENAI_API_KEY}
-    models:
-      gpt-4.1:
-        type: chat
-      gpt-image-1:
-        type: image
-      gpt-image-2:
-        type: image
-        protocol: openai-responses
-      gemini-3.1-flash-tts-preview:
-        type: tts
-        protocol: gemini-generate-content
-
-  reverse-video:
-    base_url: https://your-newapi.example.com/v1
-    api_key: ${REVERSE_VIDEO_KEY}
-    models:
-      sora_t2v_turbo:
-        type: video
-        protocol: unified-video
-```
-
-配置完成后，可先验证：
-
-```bash
-llm chat "你好，输出一句测试文本"
-```
-
-若启动时报错，优先检查：
-
-- `~/.llm/config.yaml` 是否存在且为合法 YAML
-- `.env` 中引用的环境变量是否与 `config.yaml` 中的 `${...}` 一致
-- 对应 provider 是否同时声明了 `base_url` 和 `api_key`
-- `modes.<mode>.model` 是否能在对应 provider 的 `models` 中找到
-- 本机是否已安装 `openai` 与 `pyyaml`
-
-### `.env` 示例
-
-```bash
-OPENAI_API_KEY=your_openai_api_key
-REVERSE_VIDEO_KEY=your_reverse_video_key
-USER_AGENT=curl/8.5.0
-```
-
-### `config.yaml` 示例
-
-```yaml
-default_provider: openai
-concurrency: 4
-
-modes:
-  chat:
-    provider: openai
-    model: gpt-4.1
-  image:
-    provider: openai
-    model: gpt-image-1
-  tts:
-    provider: openai
-    model: gemini-3.1-flash-tts-preview
-  video:
-    provider: reverse-video
-    model: sora_t2v_turbo
-
-providers:
-  openai:
-    base_url: https://api.openai.com/v1
-    api_key: ${OPENAI_API_KEY}
-    models:
-      gpt-4.1:
-        type: chat
-        alias: chat-default
-      gpt-image-1:
-        type: image
-      gpt-image-2:
-        type: image
-        protocol: openai-responses
-      gemini-3.1-flash-tts-preview:
-        type: tts
-        protocol: gemini-generate-content
-
-  reverse-video:
-    base_url: https://your-newapi.example.com/v1
-    api_key: ${REVERSE_VIDEO_KEY}
-    models:
-      sora_t2v_turbo:
-        type: video
-        alias: sora-fast
-        protocol: unified-video
-        reference_transport: aliyun-s3
-        defaults:
-          aspect_ratio: "16:9"
-          size: 720p
-      sora_t2v_pro:
-        type: video
-        alias: sora-pro
-        protocol: unified-video
-        reference_transport: aliyun-s3
-
-reference_transports:
-  aliyun-s3:
-    endpoint: ${ALIYUN_S3_ENDPOINT}
-    bucket: ${ALIYUN_S3_BUCKET}
-    region: ${ALIYUN_S3_REGION}
-    access_key_id: ${ALIYUN_S3_ACCESS_KEY_ID}
-    secret_access_key: ${ALIYUN_S3_SECRET_ACCESS_KEY}
-    public_base_url: ${ALIYUN_S3_PUBLIC_BASE_URL}
-    key_prefix: llmcmd
-```
-
-配置说明：
-
-- `modes.<mode>`：声明每个 CLI mode 默认使用哪个 provider、哪个真实模型
-- `providers.<name>`：声明上游的 `base_url`、`api_key`
-- `providers.<name>.models.<model_name>`：声明模型的 `type / alias / protocol / reference_transport / defaults`
-- `protocol` 当前支持 `openai-chat-completions`、`openai-responses`、`grok2api-image`、`gemini-generate-content`、`openai-videos` 与 `unified-video`
-- `reference_transport` 可把本地参考文件先上传到命名的 S3 兼容存储，再将 URL 提供给上游
-- `reference_transports.<name>`：声明可复用的 S3 兼容上传目标
-- `alias` 可将 CLI 中使用的短名称映射到真实模型名
-- 可通过运行时环境变量覆盖 `.env`，例如 `OPENAI_API_KEY=xxx llm chat "hello"`
-- `--model` 会覆盖当前 mode 的默认模型；若该值命中某个 provider 下模型的 `alias`，会自动路由到该真实模型
-
-临时试用额外模型或 URL：
-
-有些场景只想在当前命令里试一个额外模型、临时网关或测试密钥，不希望写入 `~/.llm/.env` 或 `~/.llm/config.yaml`。可以直接在命令前设置运行时环境变量，这些值只对当前这条命令生效，并且优先级高于 `.env`。
+常用运行时覆盖：
 
 ```bash
 CHAT_MODEL=gpt-5.4 llm chat "用更强模型重写这段文案"
-IMAGE_MODEL=gemini-2.5-flash-image-preview llm image "生成一张横版海报" -o banner.jpg
+IMAGE_MODEL=gpt-image-1 llm image "生成一张横版海报" -o banner.jpg
 TTS_MODEL=gemini-3.1-flash-tts-preview llm tts "请朗读一句欢迎词" -o welcome.wav
 BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test CHAT_MODEL=gpt-5.4 llm chat "输出一句自检文本"
-BASE_URL=https://gateway.example.com/v1 API_KEY=sk-test IMAGE_MODEL=seedream-4.0 llm image "生成产品主图" -o hero.jpg
 ```
 
-常用运行时变量：
+配置排查顺序：
 
-- `CHAT_MODEL`：覆盖 `chat` 默认模型
-- `IMAGE_MODEL`：覆盖 `image` 默认模型
-- `TTS_MODEL`：覆盖 `tts` 默认模型
-- `VIDEO_MODEL`：覆盖 `video` 默认模型
-- `MODEL`：作为通用模型覆盖；未设置 mode 专属变量时生效
-- `BASE_URL`：临时覆盖当前 provider 的 `base_url`
-- `API_KEY`：临时覆盖当前 provider 的 `api_key`
+1. 检查 `~/.llm/config.yaml` 是否存在且为合法 YAML。
+2. 检查 `${ENV_NAME}` 是否能在当前环境或 `~/.llm/.env` 中展开。
+3. 检查最终 provider 是否有 `base_url` 与 `api_key`。
+4. 检查 `--model` 是否命中 alias 或模型名，并确认是否切换了 provider。
+5. 检查 `protocol` 是否属于 `CONFIGURATION.md` 中列出的可选值，并确认是否适用于当前 mode。
+6. 图片任务只返回文字时，优先确认模型是否具备图片生成能力；`llm image` 不等于任意模型都会返回图片。
 
-说明：
+最小配置示例：
 
-- 这类覆盖不会修改任何配置文件，命令结束后即失效
-- 如果同时设置了 mode 专属变量和 `MODEL`，优先使用 mode 专属变量
-- `BASE_URL` 与 `API_KEY` 是对当前命令整体生效，不区分 `chat / image / tts / video`
+```yaml
+default_provider: openai
+concurrency: 4
+
+modes:
+  chat:
+    provider: openai
+    model: gpt-4.1
+  image:
+    provider: openai
+    model: gpt-image-1
+  tts:
+    provider: gemini
+    model: gemini-3.1-flash-tts-preview
+  video:
+    provider: reverse-video
+    model: sora_t2v_turbo
+
+providers:
+  openai:
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_API_KEY}
+    models:
+      gpt-4.1:
+        type: chat
+      gpt-image-1:
+        type: image
+      gpt-image-2:
+        type: image
+        protocol: openai-responses
+
+  gemini:
+    base_url: https://generativelanguage.googleapis.com
+    api_key: ${OPENAI_API_KEY}
+    models:
+      gemini-3.1-flash-tts-preview:
+        type: tts
+        protocol: gemini-generate-content
+
+  reverse-video:
+    base_url: https://your-newapi.example.com/v1
+    api_key: ${REVERSE_VIDEO_KEY}
+    models:
+      sora_t2v_turbo:
+        type: video
+        protocol: unified-video
+```
+
+完整字段说明、`protocol` 表格、优先级、alias 解析和 `reference_transport` 配置见 [`CONFIGURATION.md`](./CONFIGURATION.md)。
 
 ## 常见工作流
 
@@ -562,6 +446,7 @@ llm chat -I -s worklog
 - 需要多轮对话却没用 `-s`，导致上下文无法复用
 - 在 YAML 里把 `aspect` 写成未加引号的 `16:9`，被 YAML 误解析
 - 期待字幕输出，但 prompt 没明确要求字幕格式
+- 在 `llm image` 中使用只支持理解或文本输出的模型，导致响应只有文字说明而没有图片
 - 忘记 `video` 是异步任务，未记录任务 ID
 - 把域名、密钥、账号写进版本控制文件，而不是放进 `.env`
 
@@ -573,4 +458,6 @@ llm chat -I -s worklog
 
 ## 相关文档
 
+- 项目主文档：[`README.md`](./README.md)
+- 配置说明：[`CONFIGURATION.md`](./CONFIGURATION.md)
 - 开发参考：[`DEVELOPING.md`](./DEVELOPING.md)

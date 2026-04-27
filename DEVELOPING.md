@@ -189,7 +189,11 @@ cli.py
 ## 文档维护规则
 
 - `README.md` 和 `SKILL.md` 都必须维护为完整使用手册
+- `CONFIGURATION.md` 是配置字段、优先级、`protocol` 可选值、模型解析和 provider 行为的唯一事实来源
+- `README.md` 可以保留配置入口、核心概念和高频注意事项，但不重复维护完整配置矩阵
+- `SKILL.md` 可以保留 Agent 自动化所需的配置摘要和最小示例，但配置细节必须指向 `CONFIGURATION.md`
 - 新增、删除或调整 CLI 用法时，`README.md` 与 `SKILL.md` 必须同步更新
+- 新增、删除或调整配置字段、协议值、模型解析规则或 reference transport 行为时，必须更新 `CONFIGURATION.md`，并检查 `README.md` 与 `SKILL.md` 是否需要更新摘要或入口
 - `SKILL.md` 可以更强调 Agent 入口和终端自动化视角，但命令能力、参数范围、配置方式不得与 `README.md` 脱节
 - 如果两份手册在组织方式上不同，应保证事实一致，而不是一处更新、另一处滞后
 - 如果需要记录实现原因、兼容边界和架构取舍，放在开发参考文档或专题设计文档中，而不是塞进使用手册
